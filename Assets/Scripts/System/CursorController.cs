@@ -30,24 +30,29 @@ public class CursorController : MonoBehaviour
     System.Collections.IEnumerator WaitForChartReady()
     {
         Debug.Log("光标等待谱面生成...");
+        yield return new WaitForEndOfFrame(); // 确保一帧完成
 
-        // 等待一帧，确保其他组件的Start方法执行完毕
-        yield return null;
+        float timeout = 5f; // 缩短超时时间
+        float startTime = Time.realtimeSinceStartup;
 
-        // 等待直到谱面解析器和生成器都准备就绪
-        while (parser == null || parser.notes.Count == 0)
+        while (parser == null || parser.notes == null || parser.notes.Count == 0)
         {
-            Debug.Log("等待谱面数据...");
-            yield return new WaitForSeconds(0.1f); // 每0.1秒检查一次
+            if (Time.realtimeSinceStartup - startTime >= timeout)
+            {
+                Debug.LogError("等待谱面数据超时！");
+                yield break; // 直接退出
+            }
+            yield return new WaitForSeconds(0.1f);
         }
 
-        // 额外等待一小段时间，确保所有音符都实例化完成
-        yield return new WaitForSeconds(0.2f);
+        // 额外检查确保数据有效
+        if (parser.notes.Count == 0)
+        {
+            Debug.LogError("谱面数据为空！");
+            yield break;
+        }
 
-        // 初始化光标
         InitializeCursor();
-
-        Debug.Log("谱面准备就绪，光标开始扫描！");
     }
 
     void Update()

@@ -7,7 +7,6 @@ using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UIElements;
 using UnityEngine.WSA;
-using static ChartSpawner;
 
 public class ChartParser : MonoBehaviour
 {
@@ -175,36 +174,164 @@ public class ChartParser : MonoBehaviour
     {
         if (string.IsNullOrEmpty(content) || content == "0")
         {
-            noteData.type = "track";  // 空内容 → "track" 类型
+            noteData.type = "track";
             noteData.length = 1f;
             return;
         }
 
-        int semicolonIndex = content.IndexOf(';');
-        if (semicolonIndex > 0)
+        Debug.Log($"解析音符内容: '{content}'");
+
+        // 检查是否包含结构符号
+        if (StructureSymbolFactory.IsStructureSymbol(content))
         {
-            // 有分号的格式，如 "4;h"
-            string lengthStr = content.Substring(0, semicolonIndex).Trim();
-            string typeStr = content.Substring(semicolonIndex + 1).Trim();
+            Debug.Log($"检测到结构符号: {content}");
 
-            // 解析基础信息（长度和类型）
-            ParseBaseInfo(content, noteData);
+            // 分离基础信息和结构符号
+            int lastSemicolon = content.LastIndexOf(';');
+            if (lastSemicolon > 0)
+            {
+                string baseInfo = content.Substring(0, lastSemicolon).Trim();
+                string symbolInfo = content.Substring(lastSemicolon + 1).Trim();
 
-            // 解析结构符号
-            ParseStructureSymbols(content, noteData);
+                Debug.Log($"基础信息: '{baseInfo}', 符号信息: '{symbolInfo}'");
+
+                // 解析基础信息
+                ParseBaseInfo(baseInfo, noteData);
+
+                // 解析结构符号
+                ParseStructureSymbols(symbolInfo, noteData);
+            }
+            else
+            {
+                // 只有结构符号，没有基础信息
+                Debug.Log("只有结构符号，直接解析基础信息");
+                ParseBaseInfo(content, noteData);
+            }
         }
         else
         {
-            // 没有分号，只有基础信息
+            // 没有结构符号，只有基础信息
+            Debug.Log("没有检测到结构符号，直接解析基础信息");
             ParseBaseInfo(content, noteData);
+        }
+
+        // 调试输出
+        if (noteData.hasLoopSymbol)
+        {
+            Debug.Log($"音符解析完成 - 类型: {noteData.type}, 长度: {noteData.length}, 循环符号: 有, 循环码: {string.Join(",", noteData.loopCodes)}");
+        }
+        else
+        {
+            Debug.Log($"音符解析完成 - 类型: {noteData.type}, 长度: {noteData.length}, 循环符号: 无");
         }
     }
 
-    //解析基础信息
-    void ParseBaseInfo(string baseInfo,NoteData noteData)
+    // 修改解析结构符号的方法
+    void ParseStructureSymbols(string symbolInfo, NoteData noteData)
     {
-        //纯数字
+        Debug.Log($"解析结构符号: '{symbolInfo}'");
 
+        // 循环符号
+        if (symbolInfo.StartsWith("loop{"))
+        {
+            Debug.Log("检测到循环符号");
+            LoopSymbol loopSymbol = new LoopSymbol();
+            loopSymbol.Parse(symbolInfo, noteData);
+            noteData.hasLoopSymbol = true;
+            noteData.loopRawData = symbolInfo;
+            noteData.loopCodes = loopSymbol.loopCodes;
+
+            // 添加到结构符号列表
+            noteData.structureSymbols.Add(loopSymbol);
+
+            Debug.Log($"循环符号解析完成: {string.Join(",", noteData.loopCodes)}");
+        }
+        else
+        {
+            Debug.Log($"未知的结构符号类型: {symbolInfo}");
+        }
+    }
+
+    // 分离基础信息和结构符号
+    string[] SplitContentAndSymbols(string content)
+    {
+        List<string> parts = new List<string>();
+        int currentIndex = 0;
+        int safetyCounter = 0; // 防止无限循环
+        const int MAX_ITERATIONS = 100;
+
+        while (currentIndex < content.Length && safetyCounter < MAX_ITERATIONS)
+        {
+            safetyCounter++;
+
+            // 查找下一个分号或结构符号
+            int semicolonIndex = content.IndexOf(';', currentIndex);
+            int structureSymbolIndex = FindStructureSymbolStart(content, currentIndex);
+
+            // 确定下一个分割点
+            int nextSplit = -1;
+            if (semicolonIndex >= 0 && structureSymbolIndex >= 0)
+                nextSplit = Mathf.Min(semicolonIndex, structureSymbolIndex);
+            else if (semicolonIndex >= 0)
+                nextSplit = semicolonIndex;
+            else if (structureSymbolIndex >= 0)
+                nextSplit = structureSymbolIndex;
+            else
+                nextSplit = content.Length;
+
+            // 防止 nextSplit 小于 currentIndex
+            if (nextSplit < currentIndex)
+            {
+                Debug.LogError($"分割位置错误: currentIndex={currentIndex}, nextSplit={nextSplit}");
+                break;
+            }
+
+            // 提取部分
+            string part = content.Substring(currentIndex, nextSplit - currentIndex).Trim();
+            if (!string.IsNullOrEmpty(part))
+                parts.Add(part);
+
+            currentIndex = nextSplit;
+            if (currentIndex < content.Length && content[currentIndex] == ';')
+                currentIndex++; // 跳过分号
+        }
+
+        if (safetyCounter >= MAX_ITERATIONS)
+        {
+            Debug.LogError($"SplitContentAndSymbols 可能进入死循环! content: '{content}'");
+        }
+
+        return parts.ToArray();
+    }
+
+    // 查找结构符号开始位置
+    int FindStructureSymbolStart(string content, int startIndex)
+    {
+        foreach (string symbolType in new string[] { "loop", "if", "switch" })
+        {
+            string searchFor = symbolType + "{";
+            int index = content.IndexOf(searchFor, startIndex);
+
+            // 添加严格的格式检查
+            if (index >= 0)
+            {
+                // 检查是否是完整的结构符号（后面跟着有效内容）
+                int braceEnd = content.IndexOf('}', index);
+                if (braceEnd > index)
+                {
+                    return index;
+                }
+                // 如果不是完整的符号，继续查找
+            }
+        }
+        return -1;
+    }
+
+
+    //解析基础信息
+    void ParseBaseInfo(string baseInfo, NoteData noteData)
+    {
+        // 纯数字 → track
         if (float.TryParse(baseInfo, out float trackLength))
         {
             noteData.type = "track";
@@ -212,7 +339,7 @@ public class ChartParser : MonoBehaviour
             return;
         }
 
-        //检查是否是单个字母（音符类型）
+        // 单个字母 → 音符类型
         if (baseInfo.Length == 1 && IsNoteType(baseInfo))
         {
             noteData.type = MapTypeToFullName(baseInfo);
@@ -220,14 +347,14 @@ public class ChartParser : MonoBehaviour
             return;
         }
 
-        //带分号的长度格式
+        // 带分号的长度格式
         int innerSemicolon = baseInfo.IndexOf(";");
         if (innerSemicolon > 0)
         {
             string lengthStr = baseInfo.Substring(0, innerSemicolon).Trim();
             string typeStr = baseInfo.Substring(innerSemicolon + 1).Trim();
 
-            if(float.TryParse(lengthStr,out float length))
+            if (float.TryParse(lengthStr, out float length))
             {
                 noteData.length = length;
             }
@@ -238,58 +365,36 @@ public class ChartParser : MonoBehaviour
             noteData.type = MapTypeToFullName(baseInfo);
             noteData.length = 1f;
         }
-
     }
 
     // 解析结构符号
-    void ParseStructureSymbols(string symbolInfo, NoteData noteData)
+    void ParseStructureSymbol(string symbolContent, NoteData noteData)
     {
-        //循环符号
-        if (symbolInfo.StartsWith("loop{"))
+        // 首先验证符号格式
+        int openBrace = symbolContent.IndexOf('{');
+        int closeBrace = symbolContent.IndexOf('}');
+
+        if (openBrace < 0 || closeBrace < openBrace)
         {
-            ParseLoopSymbol(symbolInfo, noteData);
+            Debug.LogError($"结构符号格式错误: '{symbolContent}'");
+            return;
         }
-    }
 
-    void ParseLoopSymbol(string loopStr,NoteData noteData)
-    {
-        noteData.hasLoopSymbol = true;
-        noteData.loopRawData = loopStr;
+        string symbolType = symbolContent.Substring(0, openBrace).Trim();
 
-        int startBrace = loopStr.IndexOf('{');
-        int endBrace = loopStr.IndexOf('}');
-
-        if (startBrace >= 0 && endBrace > startBrace)
+        StructureSymbol symbol = StructureSymbolFactory.CreateSymbol(symbolType);
+        if (symbol != null)
         {
-            string innerContent = loopStr.Substring(startBrace + 1, endBrace - startBrace - 1).Trim();
-
-            //按逗号分割
-            string[] codeStrings = innerContent.Split(',');
-            List<int> codes = new List<int>();
-
-            foreach(string codeStr in codeStrings)
-            {
-                string trimmedCode = codeStr.Trim();
-                if(int.TryParse(trimmedCode,out int code))
-                {
-                    codes.Add(code);
-                }
-                else
-                {
-                    Debug.LogWarning($"无法解析循环码: '{trimmedCode}'，使用默认值0");
-                    codes.Add(0);
-                }
-            }
-
-            noteData.loopCodes = codes.ToArray();
-            Debug.Log($"解析循环符号: {string.Join(",", noteData.loopCodes)}");
+            symbol.Parse(symbolContent, noteData);
+            noteData.structureSymbols.Add(symbol);
         }
         else
         {
-            Debug.LogError($"循环符号格式错误: {loopStr}");
-            noteData.loopCodes = new int[0];
+            Debug.LogWarning($"未知的结构符号类型: '{symbolType}'");
         }
     }
+
+
     // 缩写到全称的映射方法
     string MapTypeToFullName(string shortType)
     {
@@ -385,50 +490,6 @@ public class ChartParser : MonoBehaviour
             Debug.Log($"行{note.rowId} 位置{note.position} {note.type} -> {note.triggerTime:F2}s");
         }
     }
-
-    //行结构树
-    private Dictionary<int, RowNode> BuildRowStructure()
-    {
-        var rowDict = new Dictionary<int, RowNode>();
-
-        // 首先收集所有行
-        foreach (var note in notes)
-        {
-            if (!rowDict.ContainsKey(note.rowId))
-            {
-                rowDict[note.rowId] = new RowNode(note.rowId, note.indentLevel);
-            }
-            rowDict[note.rowId].notes.Add(note);
-        }
-
-        // 构建父子关系
-        var sortedRowIds = rowDict.Keys.OrderByDescending(id => id).ToList();
-
-        for (int i = 0; i < sortedRowIds.Count; i++)
-        {
-            int currentRowId = sortedRowIds[i];
-            RowNode currentNode = rowDict[currentRowId];
-            int currentIndent = currentNode.indentLevel;
-
-            // 寻找父节点（缩进量比当前行小的最近行）
-            for (int j = i + 1; j < sortedRowIds.Count; j++)
-            {
-                int potentialParentId = sortedRowIds[j];
-                RowNode potentialParent = rowDict[potentialParentId];
-
-                if (potentialParent.indentLevel < currentIndent)
-                {
-                    potentialParent.children.Add(currentNode);
-                    break;
-                }
-            }
-        }
-
-        return rowDict;
-    }
-
-    //查找行中的循环符号
-
 
 
 }

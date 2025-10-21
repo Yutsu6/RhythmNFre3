@@ -79,8 +79,15 @@ public class JudgmentManager : MonoBehaviour
 
     void RemoveMissedNotes()
     {
+        int loopCount = 0;
         for (int i = activeJudgmentQueue.Count - 1; i >= 0; i--)
         {
+            loopCount++;
+            if (loopCount > 1000) // 安全限制
+            {
+                Debug.LogError("RemoveMissedNotes 可能进入死循环！");
+                break;
+            }
             var note = activeJudgmentQueue[i];
 
             if (note.type == "hold")

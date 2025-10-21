@@ -552,6 +552,7 @@ MonoBehaviour:
   breakNote: {fileID: 1384392728838619940, guid: 5f2263a48f6eab242a29128bba7ccba7, type: 3}
   holdNote: {fileID: 3130259281559098506, guid: 6a47bf5bf57d5a04ead5f011a520fc7d, type: 3}
   track: {fileID: 1400156605813797722, guid: 1a79d4af0d591e8429d1272028e0b55c, type: 3}
+  loopSymbolPrefab: {fileID: 3238355239189743134, guid: 970ab6f368fc7a04ab891db994c536a5, type: 3}
 --- !u!4 &741931252
 Transform:
   m_ObjectHideFlags: 0
