@@ -1,0 +1,39 @@
+# Meta
+title: SimpleTest
+artist:Yyutsu
+bpm: 120
+offset:0
+level_1:5
+designer_1:aka
+
+# Main
+
+
+-1:   
+0:[0;loop{3}]
+1:[]
+2:[t]
+3:[]
+4:[t]
+
+
+-2:  
+0:[0;loop{1,2}]
+1:[2]
+3:[]
+4:[b]   
+5:[3]
+
+
+
+-3:
+tab:2
+0:[]               // 先来个Tap测试基础判定
+2:[4;h]             // 长度为4的Hold音符
+8:[4;h]
+
+-4:
+0:[t;loop{4}]                    // 简单循环
+
+
+
