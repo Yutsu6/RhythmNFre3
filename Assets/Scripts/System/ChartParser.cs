@@ -441,9 +441,7 @@ public class ChartParser : MonoBehaviour
             rowIds.Add(note.rowId);
         }
         var sortedRowIds = rowIds.ToList();
-        // 行号是负数：-1, -2, -3... 应该从大到小排序
         sortedRowIds.Sort((a, b) => b.CompareTo(a));
-
         return sortedRowIds;
     }
 
@@ -492,13 +490,6 @@ public class ChartParser : MonoBehaviour
             Debug.Log($"行{note.rowId} 位置{note.position} {note.type} -> {note.triggerTime:F2}s");
         }
     }
-
-    public int IndexOfRowId(int rowId)
-    {
-        var sortedRowIds = GetSortedRowIds();
-        return sortedRowIds.IndexOf(rowId);
-    }
-
 
 
 }
