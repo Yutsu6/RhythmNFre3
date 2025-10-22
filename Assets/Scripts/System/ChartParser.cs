@@ -181,31 +181,45 @@ public class ChartParser : MonoBehaviour
 
         Debug.Log($"解析音符内容: '{content}'");
 
+        // 先检查是否是纯结构符号（没有分号的基础信息）
+        if (IsPureStructureSymbol(content))
+        {
+            Debug.Log("检测到纯结构符号，设置为默认音轨");
+            noteData.type = "track";
+            noteData.length = 1f;
+            ParseStructureSymbols(content, noteData);
+            return;
+        }
+
         // 检查是否包含结构符号
         if (StructureSymbolFactory.IsStructureSymbol(content))
         {
             Debug.Log($"检测到结构符号: {content}");
 
-            // 分离基础信息和结构符号
-            int lastSemicolon = content.LastIndexOf(';');
-            if (lastSemicolon > 0)
+            // 找到最后一个结构符号的开始位置
+            int structureStart = FindStructureSymbolStart(content, 0);
+            if (structureStart > 0)
             {
-                string baseInfo = content.Substring(0, lastSemicolon).Trim();
-                string symbolInfo = content.Substring(lastSemicolon + 1).Trim();
+                // 有基础信息+结构符号
+                string baseInfo = content.Substring(0, structureStart).Trim();
+                // 去掉可能的分号
+                if (baseInfo.EndsWith(";"))
+                    baseInfo = baseInfo.Substring(0, baseInfo.Length - 1).Trim();
+
+                string symbolInfo = content.Substring(structureStart).Trim();
 
                 Debug.Log($"基础信息: '{baseInfo}', 符号信息: '{symbolInfo}'");
 
-                // 解析基础信息
                 ParseBaseInfo(baseInfo, noteData);
-
-                // 解析结构符号
                 ParseStructureSymbols(symbolInfo, noteData);
             }
             else
             {
-                // 只有结构符号，没有基础信息
-                Debug.Log("只有结构符号，直接解析基础信息");
-                ParseBaseInfo(content, noteData);
+                // 只有结构符号
+                Debug.Log("只有结构符号，设置为默认音轨");
+                noteData.type = "track";
+                noteData.length = 1f;
+                ParseStructureSymbols(content, noteData);
             }
         }
         else
@@ -215,15 +229,13 @@ public class ChartParser : MonoBehaviour
             ParseBaseInfo(content, noteData);
         }
 
-        // 调试输出
-        if (noteData.hasLoopSymbol)
-        {
-            Debug.Log($"音符解析完成 - 类型: {noteData.type}, 长度: {noteData.length}, 循环符号: 有, 循环码: {string.Join(",", noteData.loopCodes)}");
-        }
-        else
-        {
-            Debug.Log($"音符解析完成 - 类型: {noteData.type}, 长度: {noteData.length}, 循环符号: 无");
-        }
+        // 调试输出...
+    }
+
+    // 新增辅助方法：检查是否是纯结构符号
+    bool IsPureStructureSymbol(string content)
+    {
+        return content.StartsWith("loop{") || content.StartsWith("if{");
     }
 
     // 修改解析结构符号的方法
@@ -231,7 +243,6 @@ public class ChartParser : MonoBehaviour
     {
         Debug.Log($"解析结构符号: '{symbolInfo}'");
 
-        // 循环符号
         if (symbolInfo.StartsWith("loop{"))
         {
             Debug.Log("检测到循环符号");
@@ -240,11 +251,19 @@ public class ChartParser : MonoBehaviour
             noteData.hasLoopSymbol = true;
             noteData.loopRawData = symbolInfo;
             noteData.loopCodes = loopSymbol.loopCodes;
-
-            // 添加到结构符号列表
             noteData.structureSymbols.Add(loopSymbol);
-
             Debug.Log($"循环符号解析完成: {string.Join(",", noteData.loopCodes)}");
+        }
+        else if (symbolInfo.StartsWith("if{"))
+        {
+            Debug.Log("检测到If符号");
+            IfSymbol ifSymbol = new IfSymbol();
+            ifSymbol.Parse(symbolInfo, noteData);
+            noteData.hasIfSymbol = true;
+            noteData.ifRawData = symbolInfo;
+            noteData.ifConditionCodes = ifSymbol.conditionCodes;
+            noteData.structureSymbols.Add(ifSymbol);
+            Debug.Log($"If符号解析完成: {string.Join(",", noteData.ifConditionCodes)}");
         }
         else
         {

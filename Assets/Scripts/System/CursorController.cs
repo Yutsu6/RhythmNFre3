@@ -1,38 +1,35 @@
 using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 public class CursorController : MonoBehaviour
 {
-
-    //移动设置
+    // 移动设置
     public float speed = 4.0f;
 
-    //引用
+    // 引用
     public ChartParser parser;
     public ChartSpawner spawner;
+    public LoopManager loopManager;
+    public IfManager ifManager;
 
-    //光标状态
-    private float currentGridX = 0f;//当前横坐标
-    private int currentRowId = -1;//当前行数
+    // 光标状态
+    private float currentGridX = 0f;
+    private int currentRowId = -1;
     public float cursorTime = 0f;
     public bool isActive = false;
     private bool isTimingActive = true;
-    //private bool isInitialized = false;
-
-    public System.Action<Vector2, int, float> OnCursorPositionChanged;
 
     void Start()
     {
         StartCoroutine(WaitForChartReady());
     }
 
-    System.Collections.IEnumerator WaitForChartReady()
+    IEnumerator WaitForChartReady()
     {
         Debug.Log("光标等待谱面生成...");
-        yield return new WaitForEndOfFrame(); // 确保一帧完成
+        yield return new WaitForEndOfFrame();
 
-        float timeout = 5f; // 缩短超时时间
+        float timeout = 5f;
         float startTime = Time.realtimeSinceStartup;
 
         while (parser == null || parser.notes == null || parser.notes.Count == 0)
@@ -40,135 +37,183 @@ public class CursorController : MonoBehaviour
             if (Time.realtimeSinceStartup - startTime >= timeout)
             {
                 Debug.LogError("等待谱面数据超时！");
-                yield break; // 直接退出
+                yield break;
             }
             yield return new WaitForSeconds(0.1f);
         }
 
-        // 额外检查确保数据有效
-        if (parser.notes.Count == 0)
+        InitializeCursor();
+    }
+
+    void InitializeCursor()
+    {
+        var sortedRowIds = parser.GetSortedRowIds();
+        if (sortedRowIds.Count > 0)
         {
-            Debug.LogError("谱面数据为空！");
-            yield break;
+            currentRowId = sortedRowIds[0];
         }
 
-        InitializeCursor();
+        currentGridX = 0f;
+        cursorTime = 0f;
+
+        loopManager.Initialize(parser);
+        ifManager.Initialize(parser);
+        parser.CalculateNoteTimestamps(speed);
+
+        UpdateWorldPosition();
+        isActive = true;
+
+        Debug.Log($"光标初始化完成，起始行: {currentRowId}");
     }
 
     void Update()
     {
         if (!isActive) return;
 
-        //横向移动
+        CheckLoopSymbols();      // 1. 先检测loop符号
+        CheckIfSymbols();        // 2. 再检测if符号  
+        CheckLoopBodyEntry();    // 3. 最后处理循环体进入
+
+        // 横向移动
         if (isTimingActive)
         {
             currentGridX += speed * Time.deltaTime;
-
             cursorTime += Time.deltaTime;
         }
 
-
-        //更新世界坐标
         UpdateWorldPosition();
 
-        //跳转逻辑
         if (ShouldJumpToNextRow())
         {
-            JumpToNextRow();
+            ProcessRowEnd();
         }
     }
 
-    //光标位置初始化
-    void InitializeCursor()
+    void CheckLoopSymbols()
     {
-
-        currentRowId = -1;
-        currentGridX = 0f;
-        cursorTime = 0f;
-
-        if (parser != null)
+        // 在行首附近检查
+        if (currentGridX < 0.1f)
         {
-            parser.CalculateNoteTimestamps(speed);
+            // 只检查循环符号触发
+            foreach (var note in parser.notes)
+            {
+                if (note.rowId == currentRowId && note.hasLoopSymbol && !note.loopSymbolTriggered)
+                {
+                    note.loopSymbolTriggered = true;
+                    loopManager.OnEncounterLoopSymbol(note);
+                    loopManager.DebugLoopStates();
+                }
+            }
+        }
+    }
+
+    void CheckLoopBodyEntry()
+    {
+        // 在行首附近检查
+        if (currentGridX < 0.1f)
+        {
+            // 检查是否进入循环体开始行
+            var loopForCurrentRow = loopManager.FindLoopForRow(currentRowId);
+            if (loopForCurrentRow != null && loopForCurrentRow.loopBodyStartRow == currentRowId)
+            {
+                // 只在第一次进入时减少次数
+                if (!loopForCurrentRow.hasEnteredThisTime && loopForCurrentRow.remainingLoops > 0)
+                {
+                    loopForCurrentRow.remainingLoops--;
+                    loopForCurrentRow.hasEnteredThisTime = true;
+                    Debug.Log($"进入循环体{loopForCurrentRow.startRowId}开始行，剩余次数: {loopForCurrentRow.remainingLoops}");
+                }
+            }
         }
         else
         {
-            Debug.LogError("Parser为空！");
-        }
-
-        UpdateWorldPosition();
-
-        isActive = true;
-
-        Debug.Log($"光标初始化完成！速度: {speed}, 起始时间: {cursorTime}");
-
-
-    }
-
-    void UpdateWorldPosition()
-    {
-        // 计算考虑缩进的世界坐标
-        Vector2 worldPos = CalculateWorldPositionWithIndent(currentRowId, currentGridX);
-        transform.position = new Vector3(worldPos.x, worldPos.y, 0);
-
-        // 通知判定系统位置已更新
-        OnCursorPositionChanged?.Invoke(worldPos, currentRowId, currentGridX);
-    }
-
-    // 计算考虑缩进的世界坐标
-    Vector2 CalculateWorldPositionWithIndent(int rowId, float gridX)
-    {
-        // 基础位置（不考虑缩进）
-        Vector2 baseWorldPos = parser.GridWorld(rowId, gridX);
-
-        // 应用当前行的缩进偏移
-        float indentOffset = GetCurrentRowIndentOffset();
-
-        Vector2 finalWorldPos = new Vector2(
-            baseWorldPos.x + indentOffset,
-            baseWorldPos.y
-        );
-
-        return finalWorldPos;
-    }
-
-    // 获取当前行的缩进偏移量
-    float GetCurrentRowIndentOffset()
-    {
-        // 找到当前行的第一个音符，获取其缩进量
-        foreach (var note in parser.notes)
-        {
-            if (note.rowId == currentRowId)
+            // 离开行首时重置进入标记
+            var loopForCurrentRow = loopManager.FindLoopForRow(currentRowId);
+            if (loopForCurrentRow != null)
             {
-                return note.indentLevel; // 直接使用缩进量作为偏移
+                loopForCurrentRow.hasEnteredThisTime = false;
             }
         }
-        return 0f; // 默认无缩进
     }
 
-    bool ShouldJumpToNextRow()
+    void CheckIfSymbols()
     {
-        float currentRowlength = GetCurrentRowLength();
-
-        return currentGridX > currentRowlength;
-    }
-
-    float GetCurrentRowLength()
-    {
-        float maxPosition = 0f;
-
-        // 计算不考虑缩进的行长度（只关注音符本身的布局）
-        foreach (var note in parser.notes)
+        if (currentGridX < 0.1f)
         {
-            if (note.rowId == currentRowId)
+            foreach (var note in parser.notes)
             {
-                // 音符的实际结束位置 = 基础位置 + 长度（不加缩进量）
-                float noteEnd = note.position + note.length;
-                if (noteEnd > maxPosition) maxPosition = noteEnd;
+                if (note.rowId == currentRowId && note.hasIfSymbol && !note.ifSymbolTriggered)
+                {
+                    note.ifSymbolTriggered = true;
+                    ifManager.OnEncounterIfSymbol(note);
+
+                    int readCount = ifManager.GetReadCount(note);
+                    Debug.Log($"触发if符号: 行{currentRowId}, 第{readCount}次读取");
+                }
+            }
+        }
+        else
+        {
+            // 离开行首区域时重置触发标记
+            foreach (var note in parser.notes)
+            {
+                if (note.rowId == currentRowId && note.hasIfSymbol)
+                {
+                    note.ifSymbolTriggered = false;
+                }
+            }
+        }
+    }
+
+
+
+    // 行结束处理
+    void ProcessRowEnd()
+    {
+        int nextRow = currentRowId - 1;
+        Debug.Log($"ProcessRowEnd: 当前行{currentRowId}, 下一行{nextRow}");
+
+        // 阶段1: IF跳转决策
+        if (ifManager.ShouldSkipRow(nextRow))
+        {
+            // 传入要跳过的行(nextRow)，而不是当前行
+            int ifSkipTarget = ifManager.GetSkipTargetRow(nextRow);
+            Debug.Log($"IF跳转目标: {ifSkipTarget}");
+            if (ifSkipTarget != currentRowId)
+            {
+                JumpToRow(ifSkipTarget);
+                return;
             }
         }
 
-        return maxPosition;
+        // 阶段2: LOOP跳转决策（独立处理，现有逻辑不变）
+        // 1. 检查下一行是否在某个循环体内，且该循环没有剩余次数
+        var loopForNextRow = loopManager.FindLoopForRow(nextRow);
+        if (loopManager.ShouldSkipRow(currentRowId, nextRow))
+        {
+            int loopSkipTarget = loopManager.GetSkipTargetRow(currentRowId);
+            if (loopSkipTarget != currentRowId)
+            {
+                JumpToRow(loopSkipTarget);
+                return;
+            }
+        }
+
+        // 2. 检查是否需要循环跳转（当前行到达循环体末尾且还有剩余次数）
+        if (loopManager.ShouldLoopBack(currentRowId))
+        {
+            int loopBackRow = loopManager.GetLoopBackRow(currentRowId);
+            currentRowId = loopBackRow;
+            currentGridX = 0f;
+            UpdateWorldPosition();
+            Debug.Log($"*** 循环跳转完成: 现在在行{currentRowId} ***");
+            return;
+        }
+
+        // 3. 正常跳转到下一行
+        JumpToNextRow();
     }
+
 
     void JumpToNextRow()
     {
@@ -177,40 +222,80 @@ public class CursorController : MonoBehaviour
         if (!RowExists(nextRowId))
         {
             isTimingActive = false;
+            //Debug.Log("谱面结束");
             return;
         }
 
-        //跳转
         currentRowId = nextRowId;
         currentGridX = 0f;
-
         UpdateWorldPosition();
+
+        Debug.Log($"正常跳转到下一行: {currentRowId}");
     }
 
-    //行是否存在
+    public void JumpToRow(int rowId)
+    {
+        if (!RowExists(rowId))
+        {
+            Debug.LogError($"跳转目标行不存在: {rowId}");
+            return;
+        }
+
+        currentRowId = rowId;
+        currentGridX = 0f;
+        UpdateWorldPosition();
+
+        Debug.Log($"*** 执行跳转: {currentRowId} ***");
+    }
+
+    bool ShouldJumpToNextRow()
+    {
+        float currentRowLength = GetCurrentRowLength();
+        return currentGridX > currentRowLength;
+    }
+
+    float GetCurrentRowLength()
+    {
+        float maxPosition = 0f;
+        foreach (var note in parser.notes)
+        {
+            if (note.rowId == currentRowId)
+            {
+                float noteEnd = note.position + note.length;
+                if (noteEnd > maxPosition) maxPosition = noteEnd;
+            }
+        }
+        return maxPosition;
+    }
+
     bool RowExists(int rowId)
     {
         if (parser == null) return false;
-
-
         foreach (var note in parser.notes)
         {
-            if (note.rowId == rowId)
-            {
-                return true;
-            }
+            if (note.rowId == rowId) return true;
         }
         return false;
     }
 
-    // 公开方法，供其他系统访问当前状态
+    void UpdateWorldPosition()
+    {
+        Vector2 baseWorldPos = parser.GridWorld(currentRowId, currentGridX);
+        float indentOffset = GetCurrentRowIndentOffset();
+        Vector2 finalPos = new Vector2(baseWorldPos.x + indentOffset, baseWorldPos.y);
+        transform.position = finalPos;
+    }
+
+    float GetCurrentRowIndentOffset()
+    {
+        foreach (var note in parser.notes)
+        {
+            if (note.rowId == currentRowId)
+                return note.indentLevel * parser.cellSize;
+        }
+        return 0f;
+    }
+
     public int GetCurrentRowId() => currentRowId;
     public float GetCurrentGridX() => currentGridX;
-    public Vector2 GetWorldPosition() => transform.position;
-
-    // 新增：获取当前行的缩进量
-    public float GetCurrentRowIndent()
-    {
-        return GetCurrentRowIndentOffset();
-    }
 }

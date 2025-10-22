@@ -22,6 +22,13 @@ public class NoteData
     public bool hasLoopSymbol = false;          // 是否有循环符号
     public int[] loopCodes;     // 循环码数组
     public string loopRawData = "";             // 原始循环数据（用于调试）
+    public bool loopSymbolTriggered = false;
+
+    public bool hasIfSymbol = false;
+    public int[] ifConditionCodes;  // 修正：使用ifConditionCodes而不是conditionCodes
+    public string ifRawData = "";
+    public bool ifSymbolTriggered = false;
+
 
     // 新增：结构符号列表，支持多种符号
     public List<StructureSymbol> structureSymbols = new List<StructureSymbol>();

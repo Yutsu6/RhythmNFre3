@@ -11,6 +11,7 @@ public class ChartSpawner : MonoBehaviour
     public GameObject holdNote;
     public GameObject track;
     public GameObject loopSymbolPrefab; // 循环符号预制体
+    public GameObject ifSymbolPrefab; // 新增：if符号预制体
 
     private void Start()
     {
@@ -74,10 +75,45 @@ public class ChartSpawner : MonoBehaviour
             {
                 SpawnLoopSymbol(noteData, parentNote);
             }
+            else if (symbol is IfSymbol)
+            {
+                SpawnIfSymbol(noteData, parentNote);
+            }
             // 可以在这里添加其他类型的结构符号生成
         }
     }
 
+    void SpawnIfSymbol(NoteData noteData, GameObject parentNote)
+    {
+        if (ifSymbolPrefab == null)
+        {
+            Debug.LogWarning("If符号预制体未设置！");
+            return;
+        }
+
+        GameObject ifSymbol = Instantiate(ifSymbolPrefab);
+
+        // 计算if符号的位置（与循环符号类似）
+        Vector2 symbolPosition = CalculateIfSymbolPosition(noteData, parentNote);
+        ifSymbol.transform.position = new Vector3(symbolPosition.x, symbolPosition.y, 0);
+
+        // 设置大小和父对象
+        ifSymbol.transform.localScale = Vector3.one;
+        ifSymbol.transform.SetParent(parentNote.transform);
+        ifSymbol.name = $"IfSymbol_row{noteData.rowId}_pos{noteData.position}";
+
+        Debug.Log($"成功生成If符号在位置: ({symbolPosition.x:F2}, {symbolPosition.y:F2})");
+    }
+
+    Vector2 CalculateIfSymbolPosition(NoteData noteData, GameObject parentNote)
+    {
+        // 基础音符位置
+        Vector2 baseWorldPos = CalculateWorldPositionWithIndent(noteData);
+
+        // 对于if符号，可以稍微偏移以避免与循环符号重叠
+        // 比如在y轴上稍微向上偏移
+        return new Vector2(baseWorldPos.x, baseWorldPos.y);
+    }
     void SpawnLoopSymbol(NoteData noteData, GameObject parentNote)
     {
         if (loopSymbolPrefab == null)

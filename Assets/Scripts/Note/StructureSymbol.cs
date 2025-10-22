@@ -58,6 +58,47 @@ public class LoopSymbol : StructureSymbol
     }
 }
 // 结构符号工厂
+
+public class IfSymbol : StructureSymbol
+{
+    public int[] conditionCodes;
+
+    public override void Parse(string symbolData, NoteData noteData)
+    {
+        // 解析if{1,0,1}格式
+        int startBrace = symbolData.IndexOf('{');
+        int endBrace = symbolData.IndexOf('}');
+
+        if (startBrace >= 0 && endBrace > startBrace)
+        {
+            string innerContent = symbolData.Substring(startBrace + 1, endBrace - startBrace - 1).Trim();
+            string[] codeStrings = innerContent.Split(',');
+            List<int> codes = new List<int>();
+
+            foreach (string codeStr in codeStrings)
+            {
+                string trimmedCode = codeStr.Trim();
+                if (int.TryParse(trimmedCode, out int code) && (code == 0 || code == 1))
+                {
+                    codes.Add(code);
+                }
+                else
+                {
+                    Debug.LogWarning($"无效的判断码: '{trimmedCode}'，使用默认值0");
+                    codes.Add(0);
+                }
+            }
+
+            conditionCodes = codes.ToArray();
+        }
+        else
+        {
+            Debug.LogError($"判断符号格式错误: {symbolData}");
+            conditionCodes = new int[0];
+        }
+    }
+}
+
 public static class StructureSymbolFactory
 {
     private static Dictionary<string, System.Func<StructureSymbol>> symbolConstructors =
@@ -65,7 +106,7 @@ public static class StructureSymbolFactory
     {
         { "loop", () => new LoopSymbol() },
         // 未来可以在这里添加其他符号：
-        // { "if", () => new IfSymbol() },
+        { "if", () => new IfSymbol() }
         // { "switch", () => new SwitchSymbol() }
     };
 
@@ -80,16 +121,6 @@ public static class StructureSymbolFactory
 
     public static bool IsStructureSymbol(string content)
     {
-        // 检查是否以已知的结构符号开头
-        foreach (string symbolType in symbolConstructors.Keys)
-        {
-            if (content.Contains(symbolType + "{"))
-            {
-                Debug.Log($"检测到结构符号类型: {symbolType}");
-                return true;
-            }
-        }
-        Debug.Log($"未检测到结构符号: {content}");
-        return false;
+        return content.Contains("loop{") || content.Contains("if{");
     }
 }
