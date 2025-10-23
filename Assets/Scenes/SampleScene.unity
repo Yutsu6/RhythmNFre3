@@ -172,9 +172,58 @@ MonoBehaviour:
   spawner: {fileID: 741931251}
   loopManager: {fileID: 381529063}
   ifManager: {fileID: 1189889676}
+  commandManager: {fileID: 215618761}
   cursorTime: 0
   isActive: 0
   chartWindow: {fileID: 1640631734}
+--- !u!1 &215618760
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 215618762}
+  - component: {fileID: 215618761}
+  m_Layer: 0
+  m_Name: CommandManager
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &215618761
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 215618760}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6d98ff9e534d0024491a278036d8be4a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  cursor: {fileID: 121076959}
+  parser: {fileID: 1695460844}
+  baseBPM: 120
+  baseSpeed: 4
+--- !u!4 &215618762
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 215618760}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 2.7628977, y: -2.6961744, z: -0.05316469}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &381529062
 GameObject:
   m_ObjectHideFlags: 0
@@ -1030,3 +1079,4 @@ SceneRoots:
   - {fileID: 1189889675}
   - {fileID: 1640631735}
   - {fileID: 1742893315}
+  - {fileID: 215618762}

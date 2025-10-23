@@ -11,6 +11,7 @@ public class CursorController : MonoBehaviour
     public ChartSpawner spawner;
     public LoopManager loopManager;
     public IfManager ifManager;
+    public CommandManager commandManager; // 新增命令管理器引用
 
     // 光标状态
     private float currentGridX = 0f;
@@ -69,6 +70,15 @@ public class CursorController : MonoBehaviour
         ifManager.Initialize(parser);
         parser.CalculateNoteTimestamps(speed);
 
+        // 初始化命令管理器
+        if (commandManager == null)
+            commandManager = FindObjectOfType<CommandManager>();
+        if (commandManager != null)
+        {
+            commandManager.ResetAllCommands();
+        }
+
+
         // 确保spawner引用正确
         if (spawner == null)
         {
@@ -84,6 +94,9 @@ public class CursorController : MonoBehaviour
     void Update()
     {
         if (!isActive) return;
+
+        CheckCommands();
+
 
         CheckLoopSymbols();      // 1. 先检测loop符号
         CheckIfSymbols();        // 2. 再检测if符号  
@@ -103,6 +116,31 @@ public class CursorController : MonoBehaviour
         if (ShouldJumpToNextRow())
         {
             ProcessRowEnd();
+        }
+    }
+
+    // 新增：检查并执行命令
+    void CheckCommands()
+    {
+        // 在当前行检查命令
+        foreach (var note in parser.notes)
+        {
+            if (note.rowId == currentRowId && note.hasCommand && !note.isCommandExecuted)
+            {
+                // 检查是否到达命令位置（使用较小的容差）
+                float distanceToNote = Mathf.Abs(currentGridX - note.position);
+                if (distanceToNote < 0.05f) // 接近命令位置时执行
+                {
+                    if (commandManager != null)
+                    {
+                        commandManager.ExecuteCommand(note);
+                    }
+                    else
+                    {
+                        Debug.LogError("CommandManager未找到！");
+                    }
+                }
+            }
         }
     }
 
@@ -350,6 +388,13 @@ public class CursorController : MonoBehaviour
         int nextRow = currentRowId - 1;
         Debug.Log($"ProcessRowEnd: 当前行{currentRowId}, 下一行{nextRow}");
 
+        // 离开当前行时重置命令执行状态并增加读取次数
+        if (commandManager != null)
+        {
+            commandManager.OnLeaveRow(currentRowId);
+        }
+
+
         // 阶段1: 清理已完成的循环
         loopManager.CleanupCompletedLoops();
 
@@ -491,4 +536,6 @@ public class CursorController : MonoBehaviour
 
     public int GetCurrentRowId() => currentRowId;
     public float GetCurrentGridX() => currentGridX;
+
+
 }

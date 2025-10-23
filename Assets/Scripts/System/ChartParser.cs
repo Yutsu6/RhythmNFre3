@@ -173,6 +173,7 @@ public class ChartParser : MonoBehaviour
             }
 
             //处理单元
+            //处理单元
             int colonIndex = line.IndexOf(':');
 
             if (colonIndex > 0)
@@ -185,18 +186,35 @@ public class ChartParser : MonoBehaviour
                     //解析单元内容
                     string content = line.Substring(colonIndex + 1).Trim();
 
-                    if (content.StartsWith("[") && content.EndsWith("]"))
+                    // 检查是否是命令（没有中括号）
+                    if (IsCommandFormat(content))
+                    {
+                        NoteData newNote = new NoteData();
+                        newNote.rowId = currentRowId;
+                        newNote.position = notePosition;
+                        newNote.indentLevel = currentIndent;
+
+                        // 解析命令内容
+                        ParseCommand(content, newNote);
+                        notes.Add(newNote);
+                    }
+                    // 检查是否是单元语句（有中括号）
+                    else if (content.StartsWith("[") && content.EndsWith("]"))
                     {
                         string innerContent = content.Substring(1, content.Length - 2).Trim();
 
                         NoteData newNote = new NoteData();
                         newNote.rowId = currentRowId;
                         newNote.position = notePosition;
-                        newNote.indentLevel = currentIndent; // 设置缩进量
+                        newNote.indentLevel = currentIndent;
 
                         //单元类型和长度
                         ParseNoteContent(innerContent, newNote);
                         notes.Add(newNote);
+                    }
+                    else
+                    {
+                        Debug.LogWarning($"无法识别的单元格式: {content}");
                     }
                 }
             }
@@ -472,6 +490,14 @@ public class ChartParser : MonoBehaviour
             return;
         }
 
+        // 首先检查是否是命令格式
+        if (IsCommandFormat(content))
+        {
+            ParseCommand(content, noteData);
+            return;
+        }
+
+
         Debug.Log($"解析音符内容: '{content}'");
 
         // 设置默认值
@@ -542,6 +568,230 @@ public class ChartParser : MonoBehaviour
 
         Debug.Log($"音符解析完成 - 类型: {noteData.type}, 长度: {noteData.length}, 符号: {noteData.GetSymbolsDebugInfo()}");
     }
+
+    // 修改：更精确的命令格式检测
+    bool IsCommandFormat(string content)
+    {
+        // 命令格式特征：
+        // 1. 包含花括号 {}
+        // 2. 花括号前的内容要么是命令名，要么是(执行码)命令名
+        // 3. 不能是结构符号格式（如loop{4}）
+
+        if (!content.Contains("{") || !content.Contains("}"))
+            return false;
+
+        // 检查是否是已知的结构符号格式
+        if (IsStructureSymbol(content))
+        {
+            Debug.Log($"检测到结构符号，不是命令: {content}");
+            return false;
+        }
+
+        int braceStart = content.IndexOf('{');
+        int braceEnd = content.LastIndexOf('}');
+
+        if (braceStart < 0 || braceEnd < braceStart)
+            return false;
+
+        string beforeBraces = content.Substring(0, braceStart).Trim();
+        Debug.Log($"花括号前的内容: '{beforeBraces}'");
+
+        // 检查是否是有效的命令格式
+        // 情况1: (执行码)命令名{参数}
+        if (beforeBraces.Contains("(") && beforeBraces.Contains(")"))
+        {
+            int parenStart = beforeBraces.IndexOf('(');
+            int parenEnd = beforeBraces.IndexOf(')');
+
+            if (parenStart >= 0 && parenEnd > parenStart)
+            {
+                // 提取执行码部分
+                string codesStr = beforeBraces.Substring(parenStart + 1, parenEnd - parenStart - 1).Trim();
+                Debug.Log($"提取执行码: '{codesStr}'");
+
+                // 提取命令名部分（括号后的内容）
+                string commandName = beforeBraces.Substring(parenEnd + 1).Trim();
+                Debug.Log($"提取命令名: '{commandName}'");
+
+                if (IsValidExecutionCodes(codesStr) && IsValidCommandName(commandName))
+                {
+                    Debug.Log($"检测到带执行码的命令格式: {content}");
+                    return true;
+                }
+                else
+                {
+                    Debug.Log($"执行码或命令名无效 - 执行码: {IsValidExecutionCodes(codesStr)}, 命令名: {IsValidCommandName(commandName)}");
+                }
+            }
+        }
+        // 情况2: 命令名{参数}（无执行码）
+        else if (IsValidCommandName(beforeBraces))
+        {
+            Debug.Log($"检测到无执行码的命令格式: {content}");
+            return true;
+        }
+        else
+        {
+            Debug.Log($"不是有效的命令名或执行码格式: {beforeBraces}");
+        }
+
+        Debug.Log($"不是有效的命令格式: {content}");
+        return false;
+    }
+
+    // 新增：检查是否是有效的执行码格式
+    bool IsValidExecutionCodes(string codesStr)
+    {
+        if (string.IsNullOrEmpty(codesStr))
+        {
+            Debug.Log("执行码为空");
+            return false;
+        }
+
+        string[] codeStrs = codesStr.Split(',');
+        Debug.Log($"解析执行码: {codesStr} -> {codeStrs.Length}个码");
+
+        foreach (string codeStr in codeStrs)
+        {
+            string trimmedCode = codeStr.Trim();
+            if (!int.TryParse(trimmedCode, out int code))
+            {
+                Debug.Log($"无法解析执行码: '{trimmedCode}'");
+                return false;
+            }
+            if (code != 0 && code != 1)
+            {
+                Debug.Log($"执行码值无效(必须是0或1): {code}");
+                return false;
+            }
+        }
+
+        Debug.Log($"执行码验证通过: {codesStr}");
+        return true;
+    }
+
+    // 新增：检查是否是有效的命令名
+    bool IsValidCommandName(string name)
+    {
+        // 已知的命令名列表
+        string[] validCommands = { "speedChange", "bpmChange", "tagCreat", "tagDelete", "logCreate",
+                              "colorChange", "loopColorChange", "caseColorChange" };
+
+        bool isValid = validCommands.Contains(name);
+        Debug.Log($"检查命令名 '{name}': {(isValid ? "有效" : "无效")}");
+
+        return isValid;
+    }
+
+
+    // 修改：解析命令方法
+    void ParseCommand(string content, NoteData noteData)
+    {
+        noteData.hasCommand = true;
+        noteData.type = "command"; // 特殊类型，不生成可视音符
+
+        Debug.Log($"=== 开始解析命令 ===");
+        Debug.Log($"命令内容: {content}");
+
+        // 分离执行码和命令
+        int braceStart = content.IndexOf('{');
+        int braceEnd = content.LastIndexOf('}');
+
+        if (braceStart < 0 || braceEnd < braceStart)
+        {
+            Debug.LogError($"命令格式错误: {content}");
+            return;
+        }
+
+        string beforeBraces = content.Substring(0, braceStart).Trim();
+        string commandWithParams = content.Substring(braceStart, braceEnd - braceStart + 1);
+
+        Debug.Log($"花括号前的内容: '{beforeBraces}'");
+
+        // 解析执行码和命令名
+        if (beforeBraces.Contains("(") && beforeBraces.Contains(")"))
+        {
+            int parenStart = beforeBraces.IndexOf('(');
+            int parenEnd = beforeBraces.IndexOf(')');
+
+            if (parenStart >= 0 && parenEnd > parenStart)
+            {
+                // 提取执行码部分
+                string codesStr = beforeBraces.Substring(parenStart + 1, parenEnd - parenStart - 1).Trim();
+                noteData.executionCodes = ParseExecutionCodes(codesStr);
+                Debug.Log($"解析执行码: {string.Join(",", noteData.executionCodes)}");
+
+                // 提取命令名部分（括号后的内容）
+                string commandName = beforeBraces.Substring(parenEnd + 1).Trim();
+
+                // 解析命令名和参数
+                ParseCommandNameAndParams(commandName + commandWithParams, noteData);
+            }
+            else
+            {
+                Debug.LogError($"括号格式错误: {beforeBraces}");
+                return;
+            }
+        }
+        else
+        {
+            // 没有执行码，使用默认行为（空数组表示默认执行1次）
+            noteData.executionCodes = new int[0];
+            Debug.Log($"无执行码，使用默认行为");
+
+            // 解析命令名和参数
+            ParseCommandNameAndParams(commandWithParams, noteData);
+        }
+
+        Debug.Log($"命令解析完成: {noteData.commandName}{{{noteData.commandParams}}}, 执行码: [{string.Join(",", noteData.executionCodes)}]");
+        Debug.Log($"=== 命令解析完成 ===");
+    }
+
+    // 新增：解析执行码
+    int[] ParseExecutionCodes(string codesStr)
+    {
+        if (string.IsNullOrEmpty(codesStr)) return new int[0];
+
+        string[] codeStrs = codesStr.Split(',');
+        List<int> codes = new List<int>();
+
+        foreach (string codeStr in codeStrs)
+        {
+            if (int.TryParse(codeStr.Trim(), out int code))
+            {
+                codes.Add(code);
+            }
+            else
+            {
+                Debug.LogWarning($"无法解析执行码: {codeStr}，使用默认值0");
+                codes.Add(0);
+            }
+        }
+
+        return codes.ToArray();
+    }
+
+    // 修改：解析命令名和参数方法
+    void ParseCommandNameAndParams(string commandWithParams, NoteData noteData)
+    {
+        // 格式: 命令名{参数}
+        int braceStart = commandWithParams.IndexOf('{');
+
+        if (braceStart < 0)
+        {
+            Debug.LogError($"命令格式错误，缺少花括号: {commandWithParams}");
+            return;
+        }
+
+        string commandName = commandWithParams.Substring(0, braceStart).Trim();
+        string parameters = commandWithParams.Substring(braceStart + 1, commandWithParams.Length - braceStart - 2).Trim();
+
+        noteData.commandName = commandName;
+        noteData.commandParams = parameters;
+
+        Debug.Log($"命令名: '{commandName}', 参数: '{parameters}'");
+    }
+
 
     // 分割音符内容（考虑花括号内的逗号）
     string[] SplitNoteContent(string content)

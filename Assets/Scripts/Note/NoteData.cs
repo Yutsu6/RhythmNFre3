@@ -206,6 +206,38 @@ public class NoteData
                hasContinueSymbol || hasReturnSymbol;
     }
 
+    // 新增：命令执行方法
+    public bool ShouldExecuteCommand()
+    {
+        if (!hasCommand) return false;
+
+        // 检查执行码
+        if (executionCodes.Length == 0)
+        {
+            // 没有执行码，默认执行1次（第一次读取时执行）
+            return currentReadCount == 0;
+        }
+
+        if (currentReadCount < executionCodes.Length)
+        {
+            return executionCodes[currentReadCount] == 1;
+        }
+
+        return false;
+    }
+
+    public void IncrementReadCount()
+    {
+        currentReadCount++;
+    }
+
+    public bool CanBeReadAgain()
+    {
+        if (executionCodes.Length == 0)
+            return currentReadCount < 1; // 默认只能读1次
+        return currentReadCount < executionCodes.Length;
+    }
+
     // 获取主要符号类型（用于显示）
     public string GetPrimarySymbolType()
     {
