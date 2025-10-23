@@ -59,8 +59,101 @@ public class LoopSymbol : StructureSymbol
 }
 // 结构符号工厂
 
+// 退出符号实现
+public class BreakSymbol : StructureSymbol
+{
+    public BreakSymbol()
+    {
+        symbolType = "break";
+    }
+
+    public override void Parse(string symbolData, NoteData noteData)
+    {
+        rawData = symbolData;
+        Debug.Log($"解析退出符号");
+    }
+}
+
+// 跳过符号实现
+public class ContinueSymbol : StructureSymbol
+{
+    public ContinueSymbol()
+    {
+        symbolType = "continue";
+    }
+
+    public override void Parse(string symbolData, NoteData noteData)
+    {
+        rawData = symbolData;
+        Debug.Log($"解析跳过符号");
+    }
+}
+
+// 终止符号实现
+public class ReturnSymbol : StructureSymbol
+{
+    public ReturnSymbol()
+    {
+        symbolType = "return";
+    }
+
+    public override void Parse(string symbolData, NoteData noteData)
+    {
+        rawData = symbolData;
+        Debug.Log($"解析终止符号");
+    }
+}
+
+// 注释符号实现
+public class CommentSymbol : StructureSymbol
+{
+    public CommentSymbol()
+    {
+        symbolType = "comment";
+    }
+
+    public override void Parse(string symbolData, NoteData noteData)
+    {
+        rawData = symbolData;
+        Debug.Log($"解析注释符号");
+        // 注释符号只是一个标识，不需要解析具体内容
+    }
+}
+
+// 变速符号实现
+public class SpeedSymbol : StructureSymbol
+{
+    public string speedType; // "F" 或 "L"
+
+    public SpeedSymbol()
+    {
+        symbolType = "speed";
+    }
+
+    public override void Parse(string symbolData, NoteData noteData)
+    {
+        rawData = symbolData;
+
+        if (symbolData == "F" || symbolData == "L")
+        {
+            speedType = symbolData;
+            Debug.Log($"解析变速符号: {speedType}");
+        }
+        else
+        {
+            Debug.LogWarning($"无效的变速符号: '{symbolData}'");
+            speedType = "0";
+        }
+    }
+}
+
+
 public class IfSymbol : StructureSymbol
 {
+    public IfSymbol()
+    {
+        symbolType = "if";
+    }
     public int[] conditionCodes;
 
     public override void Parse(string symbolData, NoteData noteData)
@@ -105,9 +198,13 @@ public static class StructureSymbolFactory
         new Dictionary<string, System.Func<StructureSymbol>>()
     {
         { "loop", () => new LoopSymbol() },
-        // 未来可以在这里添加其他符号：
-        { "if", () => new IfSymbol() }
-        // { "switch", () => new SwitchSymbol() }
+        { "break", () => new BreakSymbol() },
+        { "continue", () => new ContinueSymbol() },
+        { "return", () => new ReturnSymbol() },
+        { "//", () => new CommentSymbol() },
+        { "if", () => new IfSymbol() },
+        { "F", () => new SpeedSymbol() },  // 新增
+        { "L", () => new SpeedSymbol() }   // 新增
     };
 
     public static StructureSymbol CreateSymbol(string symbolType)
@@ -121,6 +218,13 @@ public static class StructureSymbolFactory
 
     public static bool IsStructureSymbol(string content)
     {
-        return content.Contains("loop{") || content.Contains("if{");
+        return content.Contains("loop{") ||
+               content.Contains("break") ||
+               content.Contains("continue") ||
+               content.Contains("return") ||
+               content.Contains("//") ||
+               content.Contains("if{") ||
+               content.Contains("F") ||
+               content.Contains("L");
     }
 }

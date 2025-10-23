@@ -19,6 +19,8 @@ public class CursorController : MonoBehaviour
     public bool isActive = false;
     private bool isTimingActive = true;
 
+    public ChartWindow chartWindow;
+
     void Start()
     {
         StartCoroutine(WaitForChartReady());
@@ -47,6 +49,13 @@ public class CursorController : MonoBehaviour
 
     void InitializeCursor()
     {
+        // 获取BPM并计算光标速度
+        float bpm = parser.GetBPM();
+        float offset = parser.GetOffset();
+
+        speed = bpm / 60f * 2f; // BPM转为基础速度
+
+
         var sortedRowIds = parser.GetSortedRowIds();
         if (sortedRowIds.Count > 0)
         {
@@ -54,11 +63,17 @@ public class CursorController : MonoBehaviour
         }
 
         currentGridX = 0f;
-        cursorTime = 0f;
+        cursorTime = offset;
 
         loopManager.Initialize(parser);
         ifManager.Initialize(parser);
         parser.CalculateNoteTimestamps(speed);
+
+        // 确保spawner引用正确
+        if (spawner == null)
+        {
+            spawner = FindObjectOfType<ChartSpawner>();
+        }
 
         UpdateWorldPosition();
         isActive = true;
@@ -79,6 +94,8 @@ public class CursorController : MonoBehaviour
         {
             currentGridX += speed * Time.deltaTime;
             cursorTime += Time.deltaTime;
+
+            CheckMultiNoteScanning();
         }
 
         UpdateWorldPosition();
@@ -86,6 +103,166 @@ public class CursorController : MonoBehaviour
         if (ShouldJumpToNextRow())
         {
             ProcessRowEnd();
+        }
+    }
+
+    void CheckMultiNoteScanning()
+    {
+        foreach (var note in parser.notes)
+        {
+            if (note.isMultiNote && !note.isJudged && note.rowId == currentRowId)
+            {
+                CheckMultiNoteScanComplete(note.AsMultiNote());
+            }
+        }
+    }
+
+    // 修改：检查Multi音符是否被光标扫描到
+    void CheckMultiNoteScanComplete(MultiNoteData multiNote)
+    {
+        if (multiNote.IsComplete() || multiNote.isJudged) return;
+
+        // 计算Multi音符的结束位置
+        float multiNoteEndX = multiNote.position + multiNote.length;
+
+        // 检查光标是否进入Multi音符范围
+        bool isCursorInMulti = currentGridX >= multiNote.position && currentGridX <= multiNoteEndX;
+
+        if (isCursorInMulti && !multiNote.hasEnteredJudgmentQueue)
+        {
+            // 第一次进入Multi音符
+            multiNote.hasEnteredJudgmentQueue = true;
+            Debug.Log($"光标开始扫描Multi音符: 行{multiNote.rowId}, 位置[{multiNote.position}→{multiNoteEndX}], 当前层={multiNote.GetCurrentLayer().type}");
+        }
+
+        // 检查光标是否扫描完成（超过了Multi音符的结束位置）
+        bool isScanComplete = currentGridX >= multiNoteEndX;
+        if (isScanComplete && multiNote.hasEnteredJudgmentQueue)
+        {
+            Debug.Log($"光标扫描完成Multi音符: 光标{currentGridX:F2} ≥ 结束位置{multiNoteEndX}");
+            AdvanceMultiNoteLayer(multiNote);
+        }
+
+        // 调试信息（可选，避免日志过多）
+        if (isCursorInMulti && Time.frameCount % 30 == 0) // 每30帧输出一次
+        {
+            Debug.Log($"扫描中: Multi位置[{multiNote.position}→{multiNoteEndX}], 光标={currentGridX:F2}, 剩余={multiNoteEndX - currentGridX:F2}");
+        }
+    }
+
+    // 修改：推进Multi音符到下一层
+    void AdvanceMultiNoteLayer(MultiNoteData multiNote)
+    {
+        if (multiNote.IsComplete() || multiNote.isJudged)
+        {
+            Debug.Log($"Multi音符已完成或已判定，跳过推进");
+            return;
+        }
+
+        var currentLayer = multiNote.GetCurrentLayer();
+        Debug.Log($"=== 开始推进Multi音符层 ===");
+        Debug.Log($"位置: 行{multiNote.rowId} 位置{multiNote.position}");
+        Debug.Log($"当前: 层{multiNote.currentLayerIndex}, 类型{currentLayer.type}");
+
+        // 推进到下一层
+        bool hasNextLayer = multiNote.MoveToNextLayer();
+
+        // 重置进入标记，以便下一层可以再次被扫描
+        multiNote.hasEnteredJudgmentQueue = false;
+
+        if (hasNextLayer)
+        {
+            var nextLayer = multiNote.GetCurrentLayer();
+            Debug.Log($"新当前层: 类型{nextLayer.type}, 剩余层数{multiNote.GetRemainingLayers()}");
+
+            // 更新Multi音符的视觉表现
+            UpdateMultiNoteAppearance(multiNote);
+        }
+        else
+        {
+            Debug.Log($"Multi音符全部完成");
+            multiNote.isJudged = true;
+            // 不隐藏音符，保持显示
+        }
+
+        Debug.Log($"=== Multi音符层推进完成 ===");
+    }
+
+    // 修改：更新Multi音符的外观为当前层的预制体，同时更新指示器
+    void UpdateMultiNoteAppearance(MultiNoteData multiNote)
+    {
+        if (multiNote.noteObject == null) return;
+
+        var currentLayer = multiNote.GetCurrentLayer();
+        if (currentLayer == null) return;
+
+        // 获取当前层对应的预制体
+        GameObject correctPrefab = GetPrefabByType(currentLayer.type);
+        if (correctPrefab == null)
+        {
+            Debug.LogWarning($"无法找到层类型 '{currentLayer.type}' 对应的预制体");
+            return;
+        }
+
+        // 保存当前的位置和父对象
+        Vector3 currentPosition = multiNote.noteObject.transform.position;
+        Transform parent = multiNote.noteObject.transform.parent;
+        string objectName = multiNote.noteObject.name;
+
+        // 销毁旧的游戏对象
+        Destroy(multiNote.noteObject);
+
+        // 创建新的游戏对象（使用正确层的预制体）
+        GameObject newNoteObject = Instantiate(correctPrefab, currentPosition, Quaternion.identity);
+
+        // 设置属性
+        newNoteObject.transform.parent = parent;
+        newNoteObject.name = objectName;
+
+        // 设置大小（使用Multi音符的总长度）
+        SetupMultiNoteSize(newNoteObject, multiNote.length);
+
+        // 更新引用
+        multiNote.noteObject = newNoteObject;
+
+        // 重新生成指示器和结构符号
+        var spawner = FindObjectOfType<ChartSpawner>();
+        if (spawner != null)
+        {
+            spawner.SpawnMultiIndicator(newNoteObject, multiNote);
+            spawner.SpawnStructureSymbols(multiNote, newNoteObject);
+        }
+
+        Debug.Log($" Multi音符外观更新为: {currentLayer.type}");
+
+        // 更新指示器文本（这里不需要了，因为SpawnMultiIndicator已经包含了）
+        // 指示器会在下一帧自动更新，因为MultiIndicatorUpdater的Update方法会持续运行
+    }
+
+
+    // 新增：设置Multi音符大小的方法
+    void SetupMultiNoteSize(GameObject noteObject, float length)
+    {
+        var parser = FindObjectOfType<ChartParser>();
+        if (parser == null) return;
+
+        Vector3 currentScale = noteObject.transform.localScale;
+        noteObject.transform.localScale = new Vector3(length * parser.cellSize, currentScale.y, currentScale.z);
+    }
+
+    // 新增：根据类型获取预制体（复制ChartSpawner的逻辑）
+    GameObject GetPrefabByType(string type)
+    {
+        var spawner = FindObjectOfType<ChartSpawner>();
+        if (spawner == null) return null;
+
+        switch (type)
+        {
+            case "tap": return spawner.tapNote;
+            case "break": return spawner.breakNote;
+            case "hold": return spawner.holdNote;
+            case "track": return spawner.track;
+            default: return null;
         }
     }
 
@@ -173,10 +350,12 @@ public class CursorController : MonoBehaviour
         int nextRow = currentRowId - 1;
         Debug.Log($"ProcessRowEnd: 当前行{currentRowId}, 下一行{nextRow}");
 
-        // 阶段1: IF跳转决策
+        // 阶段1: 清理已完成的循环
+        loopManager.CleanupCompletedLoops();
+
+        // 阶段2: IF跳转决策
         if (ifManager.ShouldSkipRow(nextRow))
         {
-            // 传入要跳过的行(nextRow)，而不是当前行
             int ifSkipTarget = ifManager.GetSkipTargetRow(nextRow);
             Debug.Log($"IF跳转目标: {ifSkipTarget}");
             if (ifSkipTarget != currentRowId)
@@ -186,9 +365,7 @@ public class CursorController : MonoBehaviour
             }
         }
 
-        // 阶段2: LOOP跳转决策（独立处理，现有逻辑不变）
-        // 1. 检查下一行是否在某个循环体内，且该循环没有剩余次数
-        var loopForNextRow = loopManager.FindLoopForRow(nextRow);
+        // 阶段3: LOOP跳过决策（循环次数为0时跳过整个循环体）
         if (loopManager.ShouldSkipRow(currentRowId, nextRow))
         {
             int loopSkipTarget = loopManager.GetSkipTargetRow(currentRowId);
@@ -199,18 +376,18 @@ public class CursorController : MonoBehaviour
             }
         }
 
-        // 2. 检查是否需要循环跳转（当前行到达循环体末尾且还有剩余次数）
+        // 阶段4: LOOP跳转决策（还有剩余次数时循环跳转）
         if (loopManager.ShouldLoopBack(currentRowId))
         {
             int loopBackRow = loopManager.GetLoopBackRow(currentRowId);
             currentRowId = loopBackRow;
             currentGridX = 0f;
-            UpdateWorldPosition();
+            transform.position = GetFinalCursorPosition();
             Debug.Log($"*** 循环跳转完成: 现在在行{currentRowId} ***");
             return;
         }
 
-        // 3. 正常跳转到下一行
+        // 阶段5: 正常跳转到下一行
         JumpToNextRow();
     }
 
@@ -222,13 +399,12 @@ public class CursorController : MonoBehaviour
         if (!RowExists(nextRowId))
         {
             isTimingActive = false;
-            //Debug.Log("谱面结束");
             return;
         }
 
         currentRowId = nextRowId;
         currentGridX = 0f;
-        UpdateWorldPosition();
+        transform.position = GetFinalCursorPosition(); // 改为使用统一方法
 
         Debug.Log($"正常跳转到下一行: {currentRowId}");
     }
@@ -243,10 +419,11 @@ public class CursorController : MonoBehaviour
 
         currentRowId = rowId;
         currentGridX = 0f;
-        UpdateWorldPosition();
+        transform.position = GetFinalCursorPosition(); // 改为使用统一方法
 
         Debug.Log($"*** 执行跳转: {currentRowId} ***");
     }
+
 
     bool ShouldJumpToNextRow()
     {
@@ -278,12 +455,28 @@ public class CursorController : MonoBehaviour
         return false;
     }
 
+    // 添加一个方法来获取考虑所有偏移的最终位置
+    Vector2 GetFinalCursorPosition()
+    {
+        float scrollOffset = chartWindow != null ? chartWindow.currentScrollOffset : 0f;
+
+        // 基础网格位置（不考虑缩进和滚动）
+        Vector2 rawGridPos = parser.GridWorld(currentRowId, currentGridX);
+
+        // 应用缩进偏移
+        float indentOffset = GetCurrentRowIndentOffset();
+
+        // 最终位置 = 基础位置 + 缩进 + 滚动
+        return new Vector2(
+            rawGridPos.x + indentOffset,
+            rawGridPos.y + scrollOffset
+        );
+    }
+
+
     void UpdateWorldPosition()
     {
-        Vector2 baseWorldPos = parser.GridWorld(currentRowId, currentGridX);
-        float indentOffset = GetCurrentRowIndentOffset();
-        Vector2 finalPos = new Vector2(baseWorldPos.x + indentOffset, baseWorldPos.y);
-        transform.position = finalPos;
+        transform.position = GetFinalCursorPosition();
     }
 
     float GetCurrentRowIndentOffset()

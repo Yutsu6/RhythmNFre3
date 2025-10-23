@@ -138,16 +138,6 @@ public class IfManager : MonoBehaviour
         Debug.Log($"判断体范围计算完成: {ifState.ifBodyStartRow}->{ifState.endRowId}, isRangeCalculated={ifState.isRangeCalculated}");
     }
 
-    // 获取整行的缩进级别（通过该行的第一个音符）
-    private int GetRowIndentLevel(int rowId)
-    {
-        foreach (var note in parser.notes)
-        {
-            if (note.rowId == rowId)
-                return note.indentLevel;
-        }
-        return 0;
-    }
 
     // 检查行是否应该跳过
     public bool ShouldSkipRow(int rowId)
@@ -175,18 +165,21 @@ public class IfManager : MonoBehaviour
     // 获取跳过判断体后的目标行
     public int GetSkipTargetRow(int rowToSkip)
     {
-        // 参数应该是要跳过的行(-2)，而不是当前行(-1)
         var innermostIf = FindInnermostIfForRow(rowToSkip);
         if (innermostIf != null && !innermostIf.shouldEnterBody)
         {
             var sortedRowIds = parser.GetSortedRowIds();
             int endIndex = sortedRowIds.IndexOf(innermostIf.endRowId);
 
-            if (endIndex + 1 < sortedRowIds.Count)
+            if (endIndex >= 0 && endIndex + 1 < sortedRowIds.Count)
             {
                 int skipTarget = sortedRowIds[endIndex + 1];
-                Debug.Log($"跳过判断体{innermostIf.startRowId}: 要跳过的行{rowToSkip} -> 目标{skipTarget}");
+                Debug.Log($"跳过判断体{innermostIf.startRowId}: {rowToSkip} -> {skipTarget}");
                 return skipTarget;
+            }
+            else
+            {
+                Debug.LogWarning($"无法找到判断体{innermostIf.startRowId}的结束位置");
             }
         }
 

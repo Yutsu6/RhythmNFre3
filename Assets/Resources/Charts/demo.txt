@@ -1,29 +1,52 @@
-# Meta
-title: LoopTest
-artist: Yyutsu
-bpm: 120
-offset: 0
-level_1: 6
-designer_1: aka
+﻿# Meta
 
-# Main
+title:		Ririsu's Fermata
+artist:		zyao_0
+bpm:		130
+offset:		+0.462
 
--1:
+level_1:	3
+designer_1:	CCCOT
+
+
+# Main_1
+
+-1:	//Start
 0:[loop{3}]
+1:[t;L]
+2:[]
+3:[]
 
--2:
+-2:	//[0:0]
 tab:1
-0:[if{1,0,1}]
-1:[tap]
+0:[{1,0,1}]
+1:[]
+2:[]
 
 -3:
-tab:2  
-0:[tap]
-1:[tap]
+tab:2
+0:[]
+1:[2;{t,t,b}]
+2:[]
+3:[]
+4:[]
 
--4:
+-4:	//[0:2]
 tab:1
-0:[tap]
+0:[if{1,1}]
+1:[t;F]
+2:[]
 
 -5:
+tab:2
+0:[2;{t,t,t,t};if{1}]
+1:[]
+2:[]
+3:[]
+
+-6:
 0:[]
+
+
+
+
