@@ -21,6 +21,9 @@ public class ChartParser : MonoBehaviour
     public float cellSize = 1.0f;           //单位大小
     public float rowHeight = 1.5f;          //垂直间距
 
+    public float visualScale = 0.8f;        // 新增：视觉缩放系数
+
+
     // 新增：Meta数据
     [System.Serializable]
     public class MetaData
@@ -471,11 +474,9 @@ public class ChartParser : MonoBehaviour
 
     public Vector2 GridWorld(int rowId, float position)
     {
-        // 计算世界坐标
-        // rowId: 行号（如 -1, -2）
-        // position: 在该行内的横向位置
-        float worldX = gridOrigin.x + position * cellSize;
-        float worldY = gridOrigin.y + rowId * rowHeight;
+        // 修改这里：应用视觉缩放
+        float worldX = gridOrigin.x + position * cellSize * visualScale;
+        float worldY = gridOrigin.y + rowId * rowHeight * visualScale;
 
         return new Vector2(worldX, worldY);
     }

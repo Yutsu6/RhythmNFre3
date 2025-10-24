@@ -174,7 +174,7 @@ public class CursorController : MonoBehaviour
     void UpdateWorldPosition()
     {
         Vector2 baseWorldPos = parser.GridWorld(currentRowId, currentGridX);
-        float indentOffset = GetCurrentRowIndentOffset();
+        float indentOffset = GetCurrentRowIndentOffset() * parser.visualScale; // 缩进偏移缩放
 
         Vector3 finalPos = new Vector3(
             baseWorldPos.x + indentOffset,
@@ -378,7 +378,7 @@ public class CursorController : MonoBehaviour
         foreach (var note in parser.notes)
         {
             if (note.rowId == currentRowId)
-                return note.indentLevel * parser.cellSize;
+                return note.indentLevel * parser.cellSize; // 这里返回逻辑值，在UpdateWorldPosition中缩放
         }
         return 0f;
     }

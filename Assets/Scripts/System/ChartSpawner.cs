@@ -186,10 +186,20 @@ public class ChartSpawner : MonoBehaviour
         GameObject part = Instantiate(prefab, container.transform);
         part.name = partName;
 
-        // 设置大小和位置
+        // 修改这里：应用视觉缩放
         Vector3 originalScale = part.transform.localScale;
-        part.transform.localScale = new Vector3(length * parser.cellSize, originalScale.y, originalScale.z);
-        part.transform.localPosition = new Vector3(offsetX * parser.cellSize, 0f, 0f);
+        part.transform.localScale = new Vector3(
+            length * parser.cellSize * parser.visualScale,
+            originalScale.y * parser.visualScale,
+            originalScale.z
+        );
+
+        // 修改这里：偏移位置也要缩放
+        part.transform.localPosition = new Vector3(
+            offsetX * parser.cellSize * parser.visualScale,
+            0f,
+            0f
+        );
 
         allSpawnedObjects.Add(part);
         return part;
@@ -266,14 +276,23 @@ public class ChartSpawner : MonoBehaviour
         }
 
         // 设置局部位置（body的局部坐标系是0~1）
-        line.transform.localPosition = new Vector3(localPosition, 0.5f, -0.1f);
+        line.transform.localPosition = new Vector3(
+            localPosition,
+            0.5f * parser.visualScale,  // Y位置也要缩放
+            -0.1f
+        );
 
         // 设置缩放：标准宽度1/6，需要抵消body的缩放
         float standardLineWidth = 1f / 6f;
         float localScaleX = standardLineWidth / bodyLength;
 
         // 修正：Y缩放设置为0.68
-        line.transform.localScale = new Vector3(localScaleX, 0.68f, 1f);
+        line.transform.localScale = new Vector3(
+           localScaleX * parser.visualScale,
+           0.68f * parser.visualScale,
+           1f
+       );
+
 
         allSpawnedObjects.Add(line);
         return line;
@@ -550,15 +569,15 @@ public class ChartSpawner : MonoBehaviour
     Vector2 CalculateWorldPosition(NoteData noteData)
     {
         Vector2 basePos = parser.GridWorld(noteData.rowId, noteData.position);
-        float indentOffset = noteData.indentLevel * parser.cellSize;
+        float indentOffset = noteData.indentLevel * parser.cellSize * parser.visualScale; // 缩进也要缩放
         return new Vector2(basePos.x + indentOffset, basePos.y);
     }
 
     Vector2 CalculateSymbolPosition(NoteData noteData)
     {
         Vector2 basePos = CalculateWorldPosition(noteData);
-        // 符号放在音符中间位置
-        float symbolOffset = Mathf.Min(0.5f, noteData.length * 0.5f) * parser.cellSize;
+        // 符号位置也要缩放
+        float symbolOffset = Mathf.Min(0.5f, noteData.length * 0.5f) * parser.cellSize * parser.visualScale;
         return new Vector2(basePos.x + symbolOffset, basePos.y);
     }
 
