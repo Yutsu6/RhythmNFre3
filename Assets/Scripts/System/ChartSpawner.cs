@@ -6,6 +6,7 @@ using TMPro;
 public class ChartSpawner : MonoBehaviour
 {
     public ChartParser parser;
+   // public ViewportController viewportController;
 
     public GameObject tapNote;
     public GameObject breakNote;
@@ -23,7 +24,7 @@ public class ChartSpawner : MonoBehaviour
     public GameObject multiIndicatorPrefab; // 新增：Multi指示器预制体
 
 
-    public Transform chartContainer; // 新增：谱面容器
+   // public Transform chartContainer; // 新增：谱面容器
 
     private void Start()
     {
@@ -104,11 +105,7 @@ public class ChartSpawner : MonoBehaviour
 
         GameObject newNote = Instantiate(prefabToUse);
 
-        // 设置父对象
-        if (chartContainer != null)
-        {
-            newNote.transform.SetParent(chartContainer);
-        }
+     
 
         // 世界坐标（考虑缩进量）
         Vector2 worldPos = CalculateWorldPositionWithIndent(noteData);
@@ -122,6 +119,7 @@ public class ChartSpawner : MonoBehaviour
         // 设置物体名称以便识别
         newNote.name = $"{noteData.type}_row{noteData.rowId}_pos{noteData.position}";
 
+      
         // 生成结构符号（包括循环符号）
         SpawnStructureSymbols(noteData, newNote);
     }
@@ -164,10 +162,6 @@ public class ChartSpawner : MonoBehaviour
 
         multiNoteData.noteObject = multiObject;
 
-        if (chartContainer != null)
-        {
-            multiObject.transform.SetParent(chartContainer);
-        }
 
         // 添加Multi指示器
         SpawnMultiIndicator(multiObject, multiNoteData);

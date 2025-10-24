@@ -273,8 +273,6 @@ public class HoldNoteManager : MonoBehaviour
         note.isJudged = true;
         note.judgmentResult = finalJudgment;
 
-        if (note.noteObject != null)
-            note.noteObject.SetActive(false);
     }
 
     void UpdateHoldVisuals()

@@ -184,8 +184,7 @@ public class JudgmentManager : MonoBehaviour
 
         totalNotesJudged++;
 
-        if (note.noteObject != null)
-            note.noteObject.SetActive(false);
+
     }
 
     void RecordErrorTime()
