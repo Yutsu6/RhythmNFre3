@@ -229,6 +229,9 @@ public class CursorController : MonoBehaviour
         else
         {
             multiNote.isJudged = true;
+            // 隐藏Multi音符
+            if (multiNote.noteObject != null)
+                multiNote.noteObject.SetActive(false);
         }
     }
 
@@ -239,40 +242,18 @@ public class CursorController : MonoBehaviour
         var currentLayer = multiNote.GetCurrentLayer();
         if (currentLayer == null) return;
 
-        GameObject correctPrefab = GetPrefabByType(currentLayer.type);
-        if (correctPrefab == null) return;
-
-        // 重新实例化音符对象
+        // 重新生成Multi音符（使用新的分段架构）
         Vector3 currentPosition = multiNote.noteObject.transform.position;
         Destroy(multiNote.noteObject);
 
-        GameObject newNoteObject = Instantiate(correctPrefab, currentPosition, Quaternion.identity);
-        newNoteObject.name = multiNote.noteObject.name;
-        SetupMultiNoteSize(newNoteObject, multiNote.length);
-        multiNote.noteObject = newNoteObject;
-
-        // 重新生成符号和指示器
-        spawner?.SpawnMultiIndicator(newNoteObject, multiNote);
-        spawner?.SpawnStructureSymbols(multiNote, newNoteObject);
-    }
-
-    void SetupMultiNoteSize(GameObject noteObject, float length)
-    {
-        Vector3 currentScale = noteObject.transform.localScale;
-        noteObject.transform.localScale = new Vector3(length * parser.cellSize, currentScale.y, currentScale.z);
-    }
-
-    GameObject GetPrefabByType(string type)
-    {
-        if (spawner == null) return null;
-
-        switch (type)
+        // 使用spawner重新生成Multi音符
+        if (spawner != null)
         {
-            case "tap": return spawner.tapNote;
-            case "break": return spawner.breakNote;
-            case "hold": return spawner.holdNote;
-            case "track": return spawner.track;
-            default: return null;
+            spawner.SpawnMultiNote(multiNote);
+        }
+        else
+        {
+            Debug.LogWarning("ChartSpawner引用丢失，无法更新Multi音符外观");
         }
     }
 

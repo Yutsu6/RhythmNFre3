@@ -2,29 +2,53 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using TMPro;
+using System.Linq;
 
 public class ChartSpawner : MonoBehaviour
 {
+    [Header("解析器引用")]
     public ChartParser parser;
-   // public ViewportController viewportController;
 
-    public GameObject tapNote;
-    public GameObject breakNote;
-    public GameObject holdNote;
-    public GameObject track;
-    public GameObject loopSymbolPrefab; // 循环符号预制体
-    public GameObject ifSymbolPrefab; // 新增：if符号预制体
+    [Header("音符部件预制体 - 头身尾分离")]
+    public GameObject tapHeadPrefab;
+    public GameObject tapBodyPrefab;
+    public GameObject tapTailPrefab;
+
+    public GameObject breakHeadPrefab;
+    public GameObject breakBodyPrefab;
+    public GameObject breakTailPrefab;
+
+    public GameObject holdHeadPrefab;
+    public GameObject holdBodyPrefab;
+    public GameObject holdTailPrefab;
+
+    public GameObject trackHeadPrefab;
+    public GameObject trackBodyPrefab;
+    public GameObject trackTailPrefab;
+
+    [Header("符号预制体")]
+    public GameObject loopSymbolPrefab;
+    public GameObject ifSymbolPrefab;
     public GameObject breakSymbolPrefab;
     public GameObject continueSymbolPrefab;
     public GameObject returnSymbolPrefab;
     public GameObject commentSymbolPrefab;
-    public GameObject speedSymbolF; // 加速符号预制体
-    public GameObject speedSymbolL; // 减速符号预制体
+    public GameObject speedSymbolF;
+    public GameObject speedSymbolL;
 
-    public GameObject multiIndicatorPrefab; // 新增：Multi指示器预制体
+    [Header("Multi相关")]
+    public GameObject multiIndicatorPrefab;
+    public GameObject holdLinePrefab; // Hold斜线预制体
 
+    // 常量定义
+    private const float HEAD_LENGTH = 0.2f;
+    private const float TAIL_LENGTH = 0.2f;
+    private const float MIN_BODY_LENGTH = 0.01f;
+    private const float HOLD_LINE_SPACING_MIN = 0.18f;
+    private const float HOLD_LINE_SPACING_MAX = 0.25f;
+    private const float HOLD_LINE_SPACING_OPTIMAL = 0.2f;
 
-   // public Transform chartContainer; // 新增：谱面容器
+    private List<GameObject> allSpawnedObjects = new List<GameObject>();
 
     private void Start()
     {
@@ -34,19 +58,15 @@ public class ChartSpawner : MonoBehaviour
     IEnumerator WaitForParserReady()
     {
         Debug.Log("等待解析器准备...");
-
-        // 等待几帧让所有组件初始化
         yield return new WaitForEndOfFrame();
         yield return new WaitForEndOfFrame();
 
-        // 如果parser还是null，尝试查找
         if (parser == null)
         {
             parser = FindObjectOfType<ChartParser>();
             Debug.Log($"自动查找解析器: {parser != null}");
         }
 
-        // 等待解析器完成解析
         float timeout = 5f;
         float startTime = Time.time;
 
@@ -68,67 +88,309 @@ public class ChartSpawner : MonoBehaviour
     {
         if (parser == null || parser.notes.Count == 0)
         {
-            Debug.LogError("解析器呢喵！");
+            Debug.LogError("没有谱面数据！");
             return;
         }
 
+        ClearAllSpawnedObjects();
+
         foreach (var noteData in parser.notes)
         {
-            SpawnSingleNote(noteData);
+            if (noteData.isMultiNote)
+            {
+                SpawnMultiNote(noteData.AsMultiNote());
+            }
+            else
+            {
+                SpawnSingleNote(noteData);
+            }
         }
 
-        Debug.Log("生成音符完毕喵！");
+        Debug.Log($"音符生成完成！共生成{allSpawnedObjects.Count}个对象");
     }
 
     void SpawnSingleNote(NoteData noteData)
     {
-        Debug.Log($"=== 开始生成音符 ===");
-        Debug.Log($"音符数据: 行{noteData.rowId} 位置{noteData.position} 类型{noteData.type}");
-        Debug.Log($"结构符号: {noteData.GetSymbolsDebugInfo()}");
+        Debug.Log($"生成单音符: 行{noteData.rowId} 位置{noteData.position} 类型{noteData.type} 长度{noteData.length}");
 
-        // 检查是否是Multi音符
-        if (noteData.isMultiNote)
-        {
-            Debug.Log("检测到Multi音符");
-            SpawnMultiNote(noteData.AsMultiNote());
-            return;
-        }
+        // 创建音符容器
+        GameObject noteContainer = new GameObject(GetNoteContainerName(noteData));
+        noteContainer.transform.position = CalculateWorldPosition(noteData);
+        noteContainer.transform.SetParent(this.transform);
+        allSpawnedObjects.Add(noteContainer);
 
-        GameObject prefabToUse = GetPrefabByType(noteData.type);
-        if (prefabToUse == null)
-        {
-            Debug.LogWarning($"没有为类型 '{noteData.type}' 设置预制体喵！");
-            return;
-        }
+        // 生成头身尾部件
+        SpawnNoteParts(noteContainer, noteData);
 
-        Debug.Log($"使用预制体: {prefabToUse.name}");
+        // 设置音符对象引用
+        noteData.noteObject = noteContainer;
 
-        GameObject newNote = Instantiate(prefabToUse);
-
-     
-
-        // 世界坐标（考虑缩进量）
-        Vector2 worldPos = CalculateWorldPositionWithIndent(noteData);
-
-        // 位置
-        newNote.transform.position = new Vector2(worldPos.x, worldPos.y);
-
-        // 根据类型和长度设置物体大小
-        SetupNoteSize(newNote, noteData.type, noteData.length);
-
-        // 设置物体名称以便识别
-        newNote.name = $"{noteData.type}_row{noteData.rowId}_pos{noteData.position}";
-
-      
-        // 生成结构符号（包括循环符号）
-        SpawnStructureSymbols(noteData, newNote);
+        // 生成符号
+        SpawnStructureSymbols(noteData, noteContainer);
     }
 
-    // 生成Multi音符 - 使用当前层的预制体
-
-    void SpawnMultiNote(MultiNoteData multiNoteData)
+    void SpawnNoteParts(GameObject container, NoteData noteData)
     {
-        // 重置状态，确保从第一层开始
+        float totalLength = noteData.length;
+        float bodyLength = Mathf.Max(MIN_BODY_LENGTH, totalLength - HEAD_LENGTH - TAIL_LENGTH);
+
+        Debug.Log($"音符分段: 总长={totalLength}, 头={HEAD_LENGTH}, 身={bodyLength}, 尾={TAIL_LENGTH}");
+
+        // 获取对应类型的预制体
+        var prefabs = GetNotePartPrefabs(noteData.type);
+        if (prefabs == null)
+        {
+            Debug.LogError($"无法获取音符类型 '{noteData.type}' 的预制体");
+            return;
+        }
+
+        // 生成头部
+        GameObject headPart = SpawnNotePart(container, prefabs.headPrefab, HEAD_LENGTH, 0f, "Head");
+        if (headPart != null)
+        {
+            SetupPartVisual(headPart, "head", noteData.type);
+        }
+
+        // 生成身体（如果长度足够）
+        if (bodyLength > MIN_BODY_LENGTH)
+        {
+            GameObject bodyPart = SpawnNotePart(container, prefabs.bodyPrefab, bodyLength, HEAD_LENGTH, "Body");
+            if (bodyPart != null)
+            {
+                SetupPartVisual(bodyPart, "body", noteData.type);
+
+                // 特殊处理：Hold音符的斜线
+                if (noteData.type == "hold")
+                {
+                    SpawnHoldLines(bodyPart, bodyLength);
+                }
+            }
+        }
+
+        // 生成尾部
+        GameObject tailPart = SpawnNotePart(container, prefabs.tailPrefab, TAIL_LENGTH, HEAD_LENGTH + bodyLength, "Tail");
+        if (tailPart != null)
+        {
+            SetupPartVisual(tailPart, "tail", noteData.type);
+        }
+    }
+
+    GameObject SpawnNotePart(GameObject container, GameObject prefab, float length, float offsetX, string partName)
+    {
+        if (prefab == null)
+        {
+            Debug.LogWarning($"音符部件预制体为空: {partName}");
+            return null;
+        }
+
+        GameObject part = Instantiate(prefab, container.transform);
+        part.name = partName;
+
+        // 设置大小和位置
+        Vector3 originalScale = part.transform.localScale;
+        part.transform.localScale = new Vector3(length * parser.cellSize, originalScale.y, originalScale.z);
+        part.transform.localPosition = new Vector3(offsetX * parser.cellSize, 0f, 0f);
+
+        allSpawnedObjects.Add(part);
+        return part;
+    }
+
+    void SetupPartVisual(GameObject part, string partType, string noteType)
+    {
+        SpriteRenderer renderer = part.GetComponent<SpriteRenderer>();
+        if (renderer == null) return;
+
+        Color baseColor = GetNoteBaseColor(noteType);
+
+        switch (partType)
+        {
+            case "head":
+                renderer.color = new Color(baseColor.r * 1.2f, baseColor.g * 1.2f, baseColor.b * 1.2f); // 更亮
+                break;
+            case "body":
+                renderer.color = new Color(baseColor.r, baseColor.g, baseColor.b, 0.6f); // 半透明
+                break;
+            case "tail":
+                renderer.color = new Color(baseColor.r * 0.8f, baseColor.g * 0.8f, baseColor.b * 0.8f); // 更暗
+                break;
+        }
+    }
+
+    Color GetNoteBaseColor(string noteType)
+    {
+        switch (noteType)
+        {
+            case "tap": return Color.blue;
+            case "break": return Color.red;
+            case "hold": return Color.green;
+            case "track": return Color.gray;
+            default: return Color.white;
+        }
+    }
+
+    void SpawnHoldLines(GameObject bodyPart, float bodyLength)
+    {
+        // 计算整个hold音符的总长度
+        float totalHoldLength = bodyLength + HEAD_LENGTH + TAIL_LENGTH;
+
+        HoldLineData lineData = CalculateHoldLinePositions(totalHoldLength);
+
+        Debug.Log($"生成Hold斜线: 数量={lineData.positions.Length}, 世界间距={lineData.spacing:F3}");
+
+        for (int i = 0; i < lineData.positions.Length; i++)
+        {
+            // 世界坐标位置转换为body局部坐标
+            // body的局部坐标系中，0对应世界坐标的HEAD_LENGTH，1对应世界坐标的HEAD_LENGTH + bodyLength
+            float worldPos = lineData.positions[i];
+            float localPosInBody = (worldPos - HEAD_LENGTH) / bodyLength;
+
+            CreateHoldLine(bodyPart, localPosInBody, i, bodyLength);
+        }
+    }
+
+
+    GameObject CreateHoldLine(GameObject bodyPart, float localPosition, int index, float bodyLength)
+    {
+        GameObject line;
+
+        if (holdLinePrefab != null)
+        {
+            line = Instantiate(holdLinePrefab, bodyPart.transform);
+        }
+        else
+        {
+            line = new GameObject($"HoldLine_{index}");
+            line.transform.SetParent(bodyPart.transform);
+            SpriteRenderer renderer = line.AddComponent<SpriteRenderer>();
+            renderer.color = new Color(1f, 1f, 1f, 0.7f);
+        }
+
+        // 设置局部位置（body的局部坐标系是0~1）
+        line.transform.localPosition = new Vector3(localPosition, 0.5f, -0.1f);
+
+        // 设置缩放：标准宽度1/6，需要抵消body的缩放
+        float standardLineWidth = 1f / 6f;
+        float localScaleX = standardLineWidth / bodyLength;
+
+        // 修正：Y缩放设置为0.68
+        line.transform.localScale = new Vector3(localScaleX, 0.68f, 1f);
+
+        allSpawnedObjects.Add(line);
+        return line;
+    }
+
+    HoldLineData CalculateHoldLinePositions(float totalHoldLength)
+    {
+        List<float> positions = new List<float>();
+
+        // 特殊情况：长度为1时的固定方案
+        if (Mathf.Abs(totalHoldLength - 1.0f) < 0.01f)
+        {
+            return new HoldLineData
+            {
+                positions = new float[] { 0.3f, 0.5f, 0.7f },
+                spacing = 0.2f,
+                lineCount = 3
+            };
+        }
+
+        // 计算可用空间：从0.3到totalHoldLength-0.3
+        float startPos = 0.3f;
+        float endPos = totalHoldLength - 0.3f;
+        float availableSpace = endPos - startPos;
+
+        if (availableSpace <= 0f)
+        {
+            Debug.LogWarning($"Hold长度{totalHoldLength}太小，无法放置竖线");
+            return new HoldLineData { positions = new float[0], spacing = 0f, lineCount = 0 };
+        }
+
+        Debug.Log($"Hold总长度: {totalHoldLength}, 可用空间: {availableSpace} (从{startPos}到{endPos})");
+
+        // 计算可以放置多少根HoldLine（间距数量 = HoldLine数量 - 1）
+        // 每根HoldLine占用空间：间距 + HoldLine宽度(0.167)
+        float lineWidth = 1f / 6f;
+
+        // 计算最大和最小可能的HoldLine数量
+        int maxLines = Mathf.FloorToInt(availableSpace / (HOLD_LINE_SPACING_MIN + lineWidth)) + 1;
+        int minLines = Mathf.CeilToInt(availableSpace / (HOLD_LINE_SPACING_MAX + lineWidth)) + 1;
+
+        // 确保至少3根（如果空间足够）
+        minLines = Mathf.Max(3, minLines);
+        maxLines = Mathf.Max(minLines, maxLines);
+
+        Debug.Log($"HoldLine数量范围: {minLines} ~ {maxLines}");
+
+        // 寻找最优解
+        int bestLineCount = -1;
+        float bestSpacing = 0f;
+        float minSpacingDiff = float.MaxValue;
+
+        for (int lineCount = minLines; lineCount <= maxLines; lineCount++)
+        {
+            if (lineCount <= 1) continue;
+
+            // 计算间距：总可用空间减去所有HoldLine的宽度，然后除以间距数量
+            float totalLineWidth = lineWidth * lineCount;
+            float totalSpacingSpace = availableSpace - totalLineWidth;
+            float spacing = totalSpacingSpace / (lineCount - 1);
+
+            float spacingDiff = Mathf.Abs(spacing - HOLD_LINE_SPACING_OPTIMAL);
+
+            Debug.Log($"测试 {lineCount}根HoldLine: 间距={spacing:F3}, 差值={spacingDiff:F3}");
+
+            if (spacingDiff < minSpacingDiff &&
+                spacing >= HOLD_LINE_SPACING_MIN &&
+                spacing <= HOLD_LINE_SPACING_MAX)
+            {
+                minSpacingDiff = spacingDiff;
+                bestLineCount = lineCount;
+                bestSpacing = spacing;
+            }
+        }
+
+        // 如果没有找到合适解，使用固定3根
+        if (bestLineCount == -1)
+        {
+            bestLineCount = 3;
+            bestSpacing = (availableSpace - (lineWidth * bestLineCount)) / (bestLineCount - 1);
+            Debug.LogWarning($"使用固定方案: {bestLineCount}根HoldLine, 间距={bestSpacing:F3}");
+        }
+
+        // 生成HoldLine中心点位置
+        float currentPos = startPos + lineWidth / 2f; // 第一个HoldLine中心
+
+        for (int i = 0; i < bestLineCount; i++)
+        {
+            positions.Add(currentPos);
+
+            // 下一个HoldLine中心位置 = 当前中心 + HoldLine宽度 + 间距
+            if (i < bestLineCount - 1)
+            {
+                currentPos += lineWidth + bestSpacing;
+            }
+        }
+
+        Debug.Log($"最终方案: {bestLineCount}根HoldLine, 间距={bestSpacing:F3}");
+        Debug.Log($"HoldLine中心位置: {string.Join(", ", positions.Select(p => p.ToString("F3")))}");
+
+        // 验证最后一个HoldLine位置是否正确
+        float lastLineCenter = positions[positions.Count - 1];
+        float lastLineEnd = lastLineCenter + lineWidth / 2f;
+        Debug.Log($"验证: 最后一个HoldLine结束位置={lastLineEnd:F3}, 要求位置={endPos:F3}, 差值={Mathf.Abs(lastLineEnd - endPos):F3}");
+
+        return new HoldLineData
+        {
+            positions = positions.ToArray(),
+            spacing = bestSpacing,
+            lineCount = bestLineCount
+        };
+    }
+
+    public void SpawnMultiNote(MultiNoteData multiNoteData)
+    {
+        Debug.Log($"生成Multi音符: 行{multiNoteData.rowId} 位置{multiNoteData.position} 总长{multiNoteData.length}");
+
         multiNoteData.hasEnteredJudgmentQueue = false;
 
         if (multiNoteData.IsComplete())
@@ -144,42 +406,25 @@ public class ChartSpawner : MonoBehaviour
             return;
         }
 
-        GameObject prefabToUse = GetPrefabByType(currentLayer.type);
-        if (prefabToUse == null)
-        {
-            Debug.LogWarning($"没有为Multi音符的当前层类型 '{currentLayer.type}' 设置预制体！");
-            return;
-        }
+        // 创建Multi容器
+        GameObject multiContainer = new GameObject(GetMultiContainerName(multiNoteData));
+        multiContainer.transform.position = CalculateWorldPosition(multiNoteData);
+        multiContainer.transform.SetParent(this.transform);
+        allSpawnedObjects.Add(multiContainer);
 
-        GameObject multiObject = Instantiate(prefabToUse);
-        Vector2 worldPos = CalculateWorldPositionWithIndent(multiNoteData);
-        multiObject.transform.position = new Vector2(worldPos.x, worldPos.y);
+        // 使用当前层的类型生成头身尾
+        SpawnNoteParts(multiContainer, multiNoteData);
 
-        // 使用Multi音符的总长度
-        SetupNoteSize(multiObject, "multi", multiNoteData.length);
-
-        multiObject.name = $"multi_row{multiNoteData.rowId}_pos{multiNoteData.position}";
-
-        multiNoteData.noteObject = multiObject;
-
+        multiNoteData.noteObject = multiContainer;
 
         // 添加Multi指示器
-        SpawnMultiIndicator(multiObject, multiNoteData);
+        SpawnMultiIndicator(multiContainer, multiNoteData);
+        SpawnStructureSymbols(multiNoteData, multiContainer);
 
-        SpawnStructureSymbols(multiNoteData, multiObject);
-
-        // 显示所有层信息
-        string layerInfo = "层序列: ";
-        for (int i = 0; i < multiNoteData.layers.Count; i++)
-        {
-            layerInfo += $"{multiNoteData.layers[i].type}";
-            if (i < multiNoteData.layers.Count - 1) layerInfo += " → ";
-        }
-
-        Debug.Log($"生成Multi音符: 总长度={multiNoteData.length}, 当前层={currentLayer.type}({multiNoteData.currentLayerIndex + 1}/{multiNoteData.layers.Count}), {layerInfo}");
+        Debug.Log($"Multi音符生成完成: 当前层={currentLayer.type}({multiNoteData.currentLayerIndex + 1}/{multiNoteData.layers.Count})");
     }
-    // 新增：生成Multi指示器
-    public void SpawnMultiIndicator(GameObject multiObject, MultiNoteData multiNoteData)
+
+    void SpawnMultiIndicator(GameObject multiObject, MultiNoteData multiNoteData)
     {
         if (multiIndicatorPrefab == null)
         {
@@ -187,31 +432,27 @@ public class ChartSpawner : MonoBehaviour
             return;
         }
 
-        GameObject indicator = Instantiate(multiIndicatorPrefab);
-        indicator.transform.SetParent(multiObject.transform);
+        GameObject indicator = Instantiate(multiIndicatorPrefab, multiObject.transform);
 
-        // 设置位置：右下角
+        // 设置位置：音符右侧
+        float noteWidth = multiNoteData.length * parser.cellSize;
         indicator.transform.localPosition = new Vector3(
-            multiNoteData.length * parser.cellSize * 0.5f - 0.1f, // 右侧
-            -0.1f, // 下方
-            -0.1f  // 向前显示
+            noteWidth * 0.5f + 0.2f, // 右侧偏移
+            0f,
+            -0.2f
         );
 
-        // 设置指示器名称
         indicator.name = "MultiIndicator";
-
-        // 初始化指示器显示
         InitializeMultiIndicator(indicator, multiNoteData);
+        allSpawnedObjects.Add(indicator);
     }
 
-    // 初始化Multi指示器显示
     void InitializeMultiIndicator(GameObject indicator, MultiNoteData multiNoteData)
     {
-        // 在指示器的子对象中查找TextMeshPro组件
-        var textMesh = indicator.GetComponentInChildren<TextMeshPro>();
+        TextMeshPro textMesh = indicator.GetComponentInChildren<TextMeshPro>();
         if (textMesh != null)
         {
-            textMesh.text = multiNoteData.GetRemainingHits().ToString();
+            textMesh.text = multiNoteData.GetRemainingLayers().ToString();
             var updater = indicator.AddComponent<MultiIndicatorUpdater>();
             updater.multiNoteData = multiNoteData;
         }
@@ -221,277 +462,170 @@ public class ChartSpawner : MonoBehaviour
         }
     }
 
-
-    // 新增：生成所有结构符号
-    // 新增：生成所有结构符号
-   public void SpawnStructureSymbols(NoteData noteData, GameObject parentNote)
+    public void SpawnStructureSymbols(NoteData noteData, GameObject parentNote)
     {
-        Debug.Log($"=== 开始生成结构符号 ===");
-        Debug.Log($"音符: 行{noteData.rowId} 位置{noteData.position} 类型{noteData.type}");
-        Debug.Log($"结构符号数量: {noteData.structureSymbols.Count}");
+        if (noteData.structureSymbols.Count == 0) return;
 
-        if (noteData.structureSymbols.Count == 0)
-        {
-            Debug.Log($"音符没有结构符号");
-            return;
-        }
+        Debug.Log($"生成结构符号: {noteData.structureSymbols.Count}个");
 
         foreach (var symbol in noteData.structureSymbols)
         {
-            Debug.Log($"准备生成结构符号: {symbol.symbolType}");
+            Vector2 symbolPosition = CalculateSymbolPosition(noteData);
 
             switch (symbol.symbolType)
             {
                 case "loop":
-                    Debug.Log($"生成Loop符号");
-                    SpawnLoopSymbol(noteData, parentNote, symbol as LoopSymbol);
+                    SpawnSymbol(loopSymbolPrefab, parentNote, symbolPosition, $"LoopSymbol_row{noteData.rowId}");
                     break;
                 case "if":
-                    Debug.Log($"生成If符号");
-                    SpawnIfSymbol(noteData, parentNote, symbol as IfSymbol);
+                    SpawnSymbol(ifSymbolPrefab, parentNote, symbolPosition, $"IfSymbol_row{noteData.rowId}");
                     break;
                 case "break":
-                    Debug.Log($"生成Break符号");
-                    SpawnBreakSymbol(noteData, parentNote, symbol as BreakSymbol);
+                    SpawnSymbol(breakSymbolPrefab, parentNote, symbolPosition, $"BreakSymbol_row{noteData.rowId}");
                     break;
                 case "continue":
-                    Debug.Log($"生成Continue符号");
-                    SpawnContinueSymbol(noteData, parentNote, symbol as ContinueSymbol);
+                    SpawnSymbol(continueSymbolPrefab, parentNote, symbolPosition, $"ContinueSymbol_row{noteData.rowId}");
                     break;
                 case "return":
-                    Debug.Log($"生成Return符号");
-                    SpawnReturnSymbol(noteData, parentNote, symbol as ReturnSymbol);
+                    SpawnSymbol(returnSymbolPrefab, parentNote, symbolPosition, $"ReturnSymbol_row{noteData.rowId}");
                     break;
                 case "comment":
-                    Debug.Log($"生成Comment符号");
-                    SpawnCommentSymbol(noteData, parentNote, symbol as CommentSymbol);
+                    SpawnSymbol(commentSymbolPrefab, parentNote, symbolPosition, $"CommentSymbol_row{noteData.rowId}");
                     break;
-                case "speed":  // 新增
-                SpawnSpeedSymbol(noteData, parentNote, symbol as SpeedSymbol);
+                case "speed":
+                    SpawnSpeedSymbol(noteData, parentNote, symbol as SpeedSymbol);
                     break;
                 default:
                     Debug.LogWarning($"未知的结构符号类型: {symbol.symbolType}");
                     break;
             }
         }
-        Debug.Log($"=== 结构符号生成完成 ===");
+    }
+
+    void SpawnSymbol(GameObject symbolPrefab, GameObject parent, Vector2 position, string name)
+    {
+        if (symbolPrefab == null)
+        {
+            Debug.LogWarning($"符号预制体未设置: {name}");
+            return;
+        }
+
+        GameObject symbol = Instantiate(symbolPrefab, parent.transform);
+        symbol.transform.position = new Vector3(position.x, position.y, -0.1f);
+        symbol.name = name;
+        allSpawnedObjects.Add(symbol);
+
+        Debug.Log($"生成符号: {name}");
     }
 
     void SpawnSpeedSymbol(NoteData noteData, GameObject parentNote, SpeedSymbol speedSymbol)
     {
-        // 根据 speedType 选择对应的预制体
-        GameObject prefabToUse = null;
-
-        if (speedSymbol.speedType == "F")
-        {
-            prefabToUse = speedSymbolF;
-        }
-        else if (speedSymbol.speedType == "L")
-        {
-            prefabToUse = speedSymbolL;
-        }
-
+        GameObject prefabToUse = speedSymbol.speedType == "F" ? speedSymbolF : speedSymbolL;
         if (prefabToUse == null)
         {
             Debug.LogWarning($"变速符号预制体未设置: {speedSymbol.speedType}");
             return;
         }
 
-        GameObject symbolObj = Instantiate(prefabToUse);
-        Vector2 basePos = CalculateWorldPositionWithIndent(noteData);
-        Vector2 symbolPos = new Vector2(basePos.x, basePos.y);
-
-        symbolObj.transform.position = symbolPos;
-        symbolObj.transform.SetParent(parentNote.transform);
+        Vector2 symbolPosition = CalculateSymbolPosition(noteData);
+        GameObject symbolObj = Instantiate(prefabToUse, parentNote.transform);
+        symbolObj.transform.position = new Vector3(symbolPosition.x, symbolPosition.y, -0.1f);
         symbolObj.name = $"SpeedSymbol_{speedSymbol.speedType}";
+        allSpawnedObjects.Add(symbolObj);
 
         Debug.Log($"生成变速符号: {speedSymbol.speedType}");
     }
 
-    void SpawnLoopSymbol(NoteData noteData, GameObject parentNote, LoopSymbol loopSymbol)
+    // 辅助方法
+    string GetNoteContainerName(NoteData noteData)
     {
-        if (loopSymbolPrefab == null)
-        {
-            Debug.LogWarning("循环符号预制体未设置！");
-            return;
-        }
-
-        GameObject symbolObj = Instantiate(loopSymbolPrefab);
-        Vector2 symbolPosition = CalculateSymbolPosition(noteData);
-        symbolObj.transform.position = new Vector3(symbolPosition.x, symbolPosition.y, 0);
-        symbolObj.transform.localScale = Vector3.one;
-        symbolObj.transform.SetParent(parentNote.transform);
-        symbolObj.name = $"LoopSymbol_row{noteData.rowId}_pos{noteData.position}";
-
-        Debug.Log($"成功生成循环符号");
+        return $"{noteData.type}_row{noteData.rowId}_pos{noteData.position}_container";
     }
 
-    void SpawnIfSymbol(NoteData noteData, GameObject parentNote, IfSymbol ifSymbol)
+    string GetMultiContainerName(MultiNoteData multiNoteData)
     {
-        Debug.Log($"=== 开始生成If符号 ===");
-
-        if (ifSymbolPrefab == null)
-        {
-            Debug.LogError("If符号预制体未设置！");
-            return;
-        }
-
-        Debug.Log($"If符号预制体: {ifSymbolPrefab.name}");
-        Debug.Log($"父对象: {parentNote.name}");
-
-        GameObject symbolObj = Instantiate(ifSymbolPrefab);
-        Debug.Log($"实例化If符号对象: {symbolObj.name}");
-
-        Vector2 symbolPosition = CalculateSymbolPosition(noteData);
-        Debug.Log($"符号位置: {symbolPosition}");
-
-        symbolObj.transform.position = new Vector3(symbolPosition.x, symbolPosition.y, 0);
-        symbolObj.transform.localScale = Vector3.one;
-        symbolObj.transform.SetParent(parentNote.transform);
-        symbolObj.name = $"IfSymbol_row{noteData.rowId}_pos{noteData.position}";
-
-        Debug.Log($"If符号设置完成: {symbolObj.name}, 父对象: {symbolObj.transform.parent.name}");
-        Debug.Log($"=== If符号生成完成 ===");
+        return $"multi_row{multiNoteData.rowId}_pos{multiNoteData.position}_container";
     }
 
-    void SpawnBreakSymbol(NoteData noteData, GameObject parentNote, BreakSymbol breakSymbol)
+    Vector2 CalculateWorldPosition(NoteData noteData)
     {
-        if (breakSymbolPrefab == null)
-        {
-            Debug.LogWarning("Break符号预制体未设置！");
-            return;
-        }
-
-        GameObject symbolObj = Instantiate(breakSymbolPrefab);
-        Vector2 symbolPosition = CalculateSymbolPosition(noteData);
-        symbolObj.transform.position = new Vector3(symbolPosition.x, symbolPosition.y, 0);
-        symbolObj.transform.localScale = Vector3.one;
-        symbolObj.transform.SetParent(parentNote.transform);
-        symbolObj.name = $"BreakSymbol_row{noteData.rowId}_pos{noteData.position}";
-
-        Debug.Log("成功生成Break符号");
+        Vector2 basePos = parser.GridWorld(noteData.rowId, noteData.position);
+        float indentOffset = noteData.indentLevel * parser.cellSize;
+        return new Vector2(basePos.x + indentOffset, basePos.y);
     }
 
-    void SpawnContinueSymbol(NoteData noteData, GameObject parentNote, ContinueSymbol continueSymbol)
-    {
-        if (continueSymbolPrefab == null)
-        {
-            Debug.LogWarning("Continue符号预制体未设置！");
-            return;
-        }
-
-        GameObject symbolObj = Instantiate(continueSymbolPrefab);
-        Vector2 symbolPosition = CalculateSymbolPosition(noteData);
-        symbolObj.transform.position = new Vector3(symbolPosition.x, symbolPosition.y, 0);
-        symbolObj.transform.localScale = Vector3.one;
-        symbolObj.transform.SetParent(parentNote.transform);
-        symbolObj.name = $"ContinueSymbol_row{noteData.rowId}_pos{noteData.position}";
-
-        Debug.Log("成功生成Continue符号");
-    }
-
-    void SpawnReturnSymbol(NoteData noteData, GameObject parentNote, ReturnSymbol returnSymbol)
-    {
-        if (returnSymbolPrefab == null)
-        {
-            Debug.LogWarning("Return符号预制体未设置！");
-            return;
-        }
-
-        GameObject symbolObj = Instantiate(returnSymbolPrefab);
-        Vector2 symbolPosition = CalculateSymbolPosition(noteData);
-        symbolObj.transform.position = new Vector3(symbolPosition.x, symbolPosition.y, 0);
-        symbolObj.transform.localScale = Vector3.one;
-        symbolObj.transform.SetParent(parentNote.transform);
-        symbolObj.name = $"ReturnSymbol_row{noteData.rowId}_pos{noteData.position}";
-
-        Debug.Log("成功生成Return符号");
-    }
-
-    void SpawnCommentSymbol(NoteData noteData, GameObject parentNote, CommentSymbol commentSymbol)
-    {
-        if (commentSymbolPrefab == null)
-        {
-            Debug.LogWarning("Comment符号预制体未设置！");
-            return;
-        }
-
-        GameObject symbolObj = Instantiate(commentSymbolPrefab);
-        Vector2 symbolPosition = CalculateSymbolPosition(noteData);
-        symbolObj.transform.position = new Vector3(symbolPosition.x, symbolPosition.y, 0);
-        symbolObj.transform.localScale = Vector3.one;
-        symbolObj.transform.SetParent(parentNote.transform);
-        symbolObj.name = $"CommentSymbol_row{noteData.rowId}_pos{noteData.position}";
-
-        Debug.Log("成功生成Comment符号");
-    }
-
-    // 简化：统一的符号位置计算方法
     Vector2 CalculateSymbolPosition(NoteData noteData)
     {
-        return CalculateWorldPositionWithIndent(noteData);
+        Vector2 basePos = CalculateWorldPosition(noteData);
+        // 符号放在音符中间位置
+        float symbolOffset = Mathf.Min(0.5f, noteData.length * 0.5f) * parser.cellSize;
+        return new Vector2(basePos.x + symbolOffset, basePos.y);
     }
 
-    Vector2 CalculateWorldPositionWithIndent(NoteData noteData)
+    NotePartPrefabs GetNotePartPrefabs(string noteType)
     {
-        Vector2 baseWorldPos = parser.GridWorld(noteData.rowId, noteData.position);
-        float indentOffset = noteData.indentLevel * parser.cellSize;
-
-        Vector2 finalWorldPos = new Vector2(
-            baseWorldPos.x + indentOffset,
-            baseWorldPos.y
-        );
-
-        return finalWorldPos;
-    }
-
-
-    // 统一设置音符大小的方法
-    void SetupNoteSize(GameObject noteObject, string type, float length)
-    {
-        Vector3 currentScale = noteObject.transform.localScale;
-
-        switch (type)
+        switch (noteType)
         {
-            case "hold":
-                // Hold - 调整宽度
-                noteObject.transform.localScale = new Vector3(length * parser.cellSize, currentScale.y, currentScale.z);
-                Debug.Log($"生成Hold音符，长度: {length} 格, 实际宽度: {length * parser.cellSize} 单位");
-                break;
-
-            case "track":
-                // 音轨 - 调整宽度
-                noteObject.transform.localScale = new Vector3(length * parser.cellSize, currentScale.y, currentScale.z);
-                Debug.Log($"生成音轨，长度: {length} 格");
-                break;
-
             case "tap":
+                return new NotePartPrefabs(tapHeadPrefab, tapBodyPrefab, tapTailPrefab);
             case "break":
-                // Tap/Break - 调整宽度（如果长度>1）
-                noteObject.transform.localScale = new Vector3(length * parser.cellSize, currentScale.y, currentScale.z);
-                Debug.Log($"生成{type}音符，长度: {length} 格");
-                break;
-            case "multi":
-                // Multi音符也调整宽度
-                noteObject.transform.localScale = new Vector3(length * parser.cellSize, currentScale.y, currentScale.z);
-                Debug.Log($"生成Multi音符，长度: {length} 格");
-                break;
+                return new NotePartPrefabs(breakHeadPrefab, breakBodyPrefab, breakTailPrefab);
+            case "hold":
+                return new NotePartPrefabs(holdHeadPrefab, holdBodyPrefab, holdTailPrefab);
+            case "track":
+                return new NotePartPrefabs(trackHeadPrefab, trackBodyPrefab, trackTailPrefab);
+            default:
+                Debug.LogWarning($"未知的音符类型: {noteType}");
+                return null;
         }
     }
 
-    GameObject GetPrefabByType(string type)
+    void ClearAllSpawnedObjects()
     {
-        switch (type)
+        foreach (GameObject obj in allSpawnedObjects)
         {
-            case "tap": return tapNote;
-            case "break": return breakNote;
-            case "hold": return holdNote;
-            case "track": return track;
-            default: return null;
+            if (obj != null)
+                DestroyImmediate(obj);
+        }
+        allSpawnedObjects.Clear();
+    }
+
+    [ContextMenu("重新生成所有音符")]
+    void RegenerateAllNotes()
+    {
+        ClearAllSpawnedObjects();
+
+        if (parser != null)
+        {
+            parser.ParseChart();
+            SpawnAllNotes();
         }
     }
 
-    // 新增：Multi指示器更新器
+    // 辅助类
+    [System.Serializable]
+    public class NotePartPrefabs
+    {
+        public GameObject headPrefab;
+        public GameObject bodyPrefab;
+        public GameObject tailPrefab;
+
+        public NotePartPrefabs(GameObject head, GameObject body, GameObject tail)
+        {
+            headPrefab = head;
+            bodyPrefab = body;
+            tailPrefab = tail;
+        }
+    }
+
+    public struct HoldLineData
+    {
+        public float[] positions;
+        public float spacing;
+        public int lineCount; // 添加这行
+    }
+
+    // Multi指示器更新器（保持不变）
     public class MultiIndicatorUpdater : MonoBehaviour
     {
         public MultiNoteData multiNoteData;
@@ -499,24 +633,16 @@ public class ChartSpawner : MonoBehaviour
 
         void Start()
         {
-            // 在子对象中查找TextMeshPro组件
             textMesh = GetComponentInChildren<TextMeshPro>();
         }
 
         void Update()
         {
-            UpdateDisplay();
-        }
-
-        void UpdateDisplay()
-        {
             if (textMesh != null && multiNoteData != null)
             {
-                // 使用剩余层数而不是打击次数
                 int remainingLayers = multiNoteData.GetRemainingLayers();
                 textMesh.text = remainingLayers.ToString();
 
-                // 根据剩余层数改变颜色
                 if (remainingLayers <= 1)
                     textMesh.color = Color.red;
                 else if (remainingLayers <= 3)
@@ -524,26 +650,6 @@ public class ChartSpawner : MonoBehaviour
                 else
                     textMesh.color = Color.white;
             }
-        }
-    }
-
-
-    // 在编辑器中添加一个按钮，方便重新生成
-    [ContextMenu("重新生成所有音符")]
-    void RegenerateAllNotes()
-    {
-        // 先删除所有已生成的音符
-        foreach (Transform child in transform)
-        {
-            DestroyImmediate(child.gameObject);
-        }
-
-
-        // 重新解析和生成
-        if (parser != null)
-        {
-            parser.ParseChart();
-            SpawnAllNotes();
         }
     }
 }
