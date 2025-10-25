@@ -25,6 +25,16 @@ public class CursorController : MonoBehaviour
 
     void Start()
     {
+        Debug.Log("CursorController Start开始");
+
+        // 确保所有组件引用正确
+        if (parser == null) parser = FindObjectOfType<ChartParser>();
+        if (spawner == null) spawner = FindObjectOfType<ChartSpawner>();
+        if (loopManager == null) loopManager = FindObjectOfType<LoopManager>();
+        if (ifManager == null) ifManager = FindObjectOfType<IfManager>();
+
+        Debug.Log($"组件引用: Parser={parser != null}, Spawner={spawner != null}, LoopManager={loopManager != null}, IfManager={ifManager != null}");
+
         StartCoroutine(WaitForChartReady());
     }
 
@@ -69,9 +79,20 @@ public class CursorController : MonoBehaviour
         currentGridX = 0f;
         cursorTime = offset;
 
+        // 初始化管理器
         loopManager.Initialize(parser);
         ifManager.Initialize(parser);
         parser.CalculateNoteTimestamps(speed);
+
+        // 检查所有IF符号
+        Debug.Log("=== 初始化时检查所有IF符号 ===");
+        foreach (var note in parser.notes)
+        {
+            if (note.hasIfSymbol)
+            {
+                Debug.Log($"发现IF符号: 行{note.rowId}, 位置{note.position}, 条件码[{string.Join(",", note.ifConditionCodes)}]");
+            }
+        }
 
         if (commandManager == null)
             commandManager = FindObjectOfType<CommandManager>();
@@ -113,8 +134,9 @@ public class CursorController : MonoBehaviour
     {
         if (currentGridX < 0.1f)
         {
-            CheckLoopSymbols();
+            // *** 先检查IF符号，再处理循环体进入 ***
             CheckIfSymbols();
+            CheckLoopSymbols();
             CheckLoopBodyEntry();
         }
         CheckCommands();
@@ -152,15 +174,31 @@ public class CursorController : MonoBehaviour
         var loopForCurrentRow = loopManager.FindInnermostLoopForRow(currentRowId);
         if (loopForCurrentRow != null && loopForCurrentRow.loopBodyStartRow == currentRowId)
         {
-            // 关键：只在循环活跃且未减少过次数时减少
-            if (loopForCurrentRow.isActive && !loopForCurrentRow.hasReducedThisCycle && loopForCurrentRow.remainingLoops > 0)
+            if (loopForCurrentRow.isActive && !loopForCurrentRow.hasReducedThisCycle)
             {
-                loopForCurrentRow.remainingLoops--;
                 loopForCurrentRow.hasReducedThisCycle = true;
 
-                Debug.Log($"进入循环体: 行{currentRowId}, 减少次数, 剩余{loopForCurrentRow.remainingLoops}次");
+                if (loopForCurrentRow.remainingLoops > 0)
+                {
+                    loopForCurrentRow.remainingLoops--;
 
-                // 如果减少后剩余次数为0，立即标记为不活跃
+                    // *** 关键逻辑：根据是否是第一次进入决定是否重置IF符号 ***
+                    if (loopForCurrentRow.isFirstEntry)
+                    {
+                        // 第一次进入：不重置IF符号，让IF符号正常触发一次
+                        Debug.Log($"第一次进入循环体{loopForCurrentRow.startRowId}，不重置IF符号触发状态");
+                        loopForCurrentRow.isFirstEntry = false; // 标记为已不是第一次
+                    }
+                    else
+                    {
+                        // 非第一次进入：重置IF符号触发状态，让IF符号可以再次触发
+                        ResetIfSymbolsInLoopBody(loopForCurrentRow);
+                        Debug.Log($"非第一次进入循环体{loopForCurrentRow.startRowId}，重置IF符号触发状态");
+                    }
+
+                    Debug.Log($"进入循环体: 行{currentRowId}, 减少次数, 剩余{loopForCurrentRow.remainingLoops}次");
+                }
+
                 if (loopForCurrentRow.remainingLoops == 0)
                 {
                     loopForCurrentRow.isActive = false;
@@ -170,16 +208,174 @@ public class CursorController : MonoBehaviour
         }
     }
 
-    void CheckIfSymbols()
+
+    // 重置循环体内的所有IF符号触发状态
+    private void ResetIfSymbolsInLoopBody(LoopState loop)
     {
-        foreach (var note in parser.notes)
+        Debug.Log($"=== 重置循环体{loop.startRowId}内的IF符号触发状态 ===");
+
+        int resetCount = 0;
+
+        // 获取循环体内的所有行
+        var sortedRowIds = parser.GetSortedRowIds();
+        int startIndex = sortedRowIds.IndexOf(loop.loopBodyStartRow);
+        int endIndex = sortedRowIds.IndexOf(loop.loopBodyEndRow);
+
+        if (startIndex == -1 || endIndex == -1)
         {
-            if (note.rowId == currentRowId && note.hasIfSymbol && !note.ifSymbolTriggered)
+            Debug.LogError($"无法找到循环体范围: {loop.loopBodyStartRow} -> {loop.loopBodyEndRow}");
+            return;
+        }
+
+        Debug.Log($"循环体范围: 行{loop.loopBodyStartRow}(索引{startIndex}) -> 行{loop.loopBodyEndRow}(索引{endIndex})");
+
+        // 遍历循环体内的所有行，重置IF符号触发状态
+        for (int i = startIndex; i <= endIndex; i++)
+        {
+            int rowId = sortedRowIds[i];
+            foreach (var note in parser.notes)
             {
-                note.ifSymbolTriggered = true;
-                ifManager.OnEncounterIfSymbol(note);
+                if (note.hasIfSymbol && note.rowId == rowId)
+                {
+                    // *** 重置所有IF符号的触发状态，不管当前状态如何 ***
+                    bool wasTriggered = note.ifSymbolTriggered;
+                    note.ifSymbolTriggered = false;
+
+                    if (wasTriggered)
+                    {
+                        resetCount++;
+                        Debug.Log($"重置IF符号触发状态: 行{note.rowId}, 位置{note.position}");
+                    }
+                    else
+                    {
+                        Debug.Log($"IF符号未触发，保持状态: 行{note.rowId}, 位置{note.position}");
+                    }
+                }
             }
         }
+
+        Debug.Log($"总共重置了{resetCount}个IF符号的触发状态");
+    }
+
+ 
+
+    void CheckIfSymbols()
+    {
+        Debug.Log($"=== 检查IF符号开始: 当前行{currentRowId}, 光标位置{currentGridX} ===");
+
+        var rowNotes = parser.notes.Where(n => n.rowId == currentRowId).ToList();
+        Debug.Log($"当前行{currentRowId}共有{rowNotes.Count}个音符");
+
+        bool foundIf = false;
+
+        foreach (var note in rowNotes)
+        {
+            Debug.Log($"检查音符: 行{note.rowId}, 位置{note.position}, 类型{note.type}, 有IF符号{note.hasIfSymbol}");
+
+            if (note.hasIfSymbol)
+            {
+                foundIf = true;
+                Debug.Log($"找到IF符号: 行{currentRowId}, 位置{note.position}, 已触发{note.ifSymbolTriggered}, 条件码[{string.Join(",", note.ifConditionCodes)}]");
+
+                if (!note.ifSymbolTriggered)
+                {
+                    float distanceToNote = Mathf.Abs(currentGridX - note.position);
+                    Debug.Log($"IF符号距离计算: 光标位置{currentGridX}, 音符位置{note.position}, 距离{distanceToNote}");
+
+                    if (distanceToNote < 0.1f)
+                    {
+                        Debug.Log($"*** 触发IF符号 ***: 行{currentRowId}, 位置{note.position}");
+                        note.ifSymbolTriggered = true;
+                        ifManager.OnEncounterIfSymbol(note);
+                    }
+                    else
+                    {
+                        Debug.Log($"IF符号距离太远: {distanceToNote} >= 0.1f，未触发");
+                    }
+                }
+                else
+                {
+                    Debug.Log($"IF符号已触发过，跳过");
+                }
+            }
+        }
+
+        if (!foundIf)
+        {
+            Debug.Log($"当前行{currentRowId}没有找到任何IF符号");
+        }
+
+        Debug.Log($"=== 检查IF符号结束 ===\n");
+    }
+
+
+
+    // 统一的跳转方法（删除之前的IF符号处理）
+    private void PerformJump(int targetRowId)
+    {
+        if (!RowExists(targetRowId))
+        {
+            Debug.LogError($"跳转目标行不存在: {targetRowId}");
+            isTimingActive = false;
+            return;
+        }
+
+        // 记录跳转前行
+        int fromRow = currentRowId;
+
+        // 执行跳转
+        currentRowId = targetRowId;
+        currentGridX = 0f;
+
+        // 通知图表窗口
+        chartWindow?.OnCursorJumpToNextRow(fromRow, targetRowId);
+
+        UpdateWorldPosition();
+
+        Debug.Log($"执行跳转: {fromRow} -> {targetRowId}");
+    }
+
+    void ProcessRowEnd()
+    {
+        int nextRow = currentRowId - 1;
+
+        Debug.Log($"行结束处理: 当前行{currentRowId}, 下一行{nextRow}");
+
+        commandManager?.OnLeaveRow(currentRowId);
+        loopManager.DebugLoopStates();
+
+        int targetRow = nextRow; // 默认目标行
+
+        // 优先级1: 循环跳转
+        if (loopManager.ShouldLoopBack(currentRowId))
+        {
+            targetRow = loopManager.GetLoopBackRow(currentRowId);
+            Debug.Log($"循环跳转: {currentRowId} -> {targetRow}");
+        }
+        // 优先级2: 循环跳过
+        else if (loopManager.ShouldSkipRow(currentRowId, nextRow))
+        {
+            targetRow = loopManager.GetSkipTargetRow(currentRowId);
+            Debug.Log($"循环跳过: {currentRowId} -> {targetRow}");
+        }
+        // 优先级3: IF跳过
+        else if (ifManager.ShouldSkipRow(nextRow))
+        {
+            int ifSkipTarget = ifManager.GetSkipTargetRow(nextRow);
+            if (ifSkipTarget != currentRowId)
+            {
+                targetRow = ifSkipTarget;
+                Debug.Log($"IF跳过: {currentRowId} -> {targetRow}");
+            }
+        }
+        // 正常跳转
+        else
+        {
+            Debug.Log($"正常跳转: {currentRowId} -> {targetRow}");
+        }
+
+        // 统一执行跳转
+        PerformJump(targetRow);
     }
 
     void UpdateWorldPosition()
@@ -266,79 +462,10 @@ public class CursorController : MonoBehaviour
         }
     }
 
-    void ProcessRowEnd()
-    {
-        int nextRow = currentRowId - 1;
-
-        Debug.Log($"行结束处理: 当前行{currentRowId}, 下一行{nextRow}");
-
-        commandManager?.OnLeaveRow(currentRowId);
-        loopManager.DebugLoopStates();
-
-        // 优先级1: 循环跳转
-        if (loopManager.ShouldLoopBack(currentRowId))
-        {
-            int loopBackRow = loopManager.GetLoopBackRow(currentRowId);
-            currentRowId = loopBackRow;
-            currentGridX = 0f;
-            UpdateWorldPosition();
-            Debug.Log($"执行循环回跳: -> 行{currentRowId}");
-            return;
-        }
-
-        // 优先级2: 循环跳过
-        if (loopManager.ShouldSkipRow(currentRowId, nextRow))
-        {
-            int skipTarget = loopManager.GetSkipTargetRow(currentRowId);
-            JumpToRow(skipTarget);
-            Debug.Log($"执行循环跳过: {currentRowId} -> 行{skipTarget}");
-            return;
-        }
-
-        // 优先级3: IF跳过
-        if (ifManager.ShouldSkipRow(nextRow))
-        {
-            int ifSkipTarget = ifManager.GetSkipTargetRow(nextRow);
-            if (ifSkipTarget != currentRowId)
-            {
-                JumpToRow(ifSkipTarget);
-                Debug.Log($"执行IF跳过: {currentRowId} -> 行{ifSkipTarget}");
-                return;
-            }
-        }
-
-        // 正常跳转
-        Debug.Log($"正常跳转到下一行: {currentRowId} -> {nextRow}");
-        JumpToNextRow();
-    }
-
-    void JumpToNextRow()
-    {
-        int nextRowId = currentRowId - 1;
-
-        if (!RowExists(nextRowId))
-        {
-            isTimingActive = false;
-            return;
-        }
-
-        chartWindow?.OnCursorJumpToNextRow(currentRowId, nextRowId);
-        currentRowId = nextRowId;
-        currentGridX = 0f;
-        UpdateWorldPosition();
-    }
-
     public void JumpToRow(int rowId)
     {
-        if (!RowExists(rowId))
-        {
-            Debug.LogError($"跳转目标行不存在: {rowId}");
-            return;
-        }
-
-        currentRowId = rowId;
-        currentGridX = 0f;
-        UpdateWorldPosition();
+        // 使用统一的跳转方法
+        PerformJump(rowId);
     }
 
     bool ShouldJumpToNextRow()

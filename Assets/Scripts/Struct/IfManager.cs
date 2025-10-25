@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 [System.Serializable]
@@ -22,39 +23,54 @@ public class IfState
         conditionCodes = codes;
         currentReadCount = 0;
         shouldEnterBody = false;
-
     }
 
     // 更新当前判断条件
     public bool UpdateAndGetCondition()
     {
-        // 先使用当前的条件码
-        bool result;
+        if (conditionCodes == null || conditionCodes.Length == 0)
+        {
+            shouldEnterBody = false;
+            Debug.LogWarning($"IF条件码为空: 行{startRowId}");
+            return false;
+        }
+
+        // 计算当前应该使用的条件码
+        int currentConditionCode;
         if (currentReadCount < conditionCodes.Length)
         {
-            result = conditionCodes[currentReadCount] == 1;
+            // 在条件码数组范围内：使用对应的条件码
+            currentConditionCode = conditionCodes[currentReadCount];
         }
         else
         {
-            result = false;
+            // 超出条件码数组范围：一律为0
+            currentConditionCode = 0;
         }
 
-        // 更新状态
+        bool result = currentConditionCode == 1;
         shouldEnterBody = result;
 
-        // 然后自增
-        currentReadCount++;
+        Debug.Log($"IF条件更新: " +
+                 $"行{startRowId}, " +
+                 $"当前计数{currentReadCount}, " +
+                 $"条件码[{string.Join(",", conditionCodes)}], " +
+                 $"当前码{currentConditionCode}, " +
+                 $"结果{result}, " +
+                 $"进入判断体{shouldEnterBody}");
+
+        // *** 移除这里的自增，让外部控制 ***
+        // currentReadCount++; // 注释掉这一行
 
         return result;
     }
-
-
 
     // 重置读取计数（用于循环场景）
     public void ResetForNewLoop()
     {
         currentReadCount = 0;
         shouldEnterBody = false;
+        Debug.Log($"IF重置: 行{startRowId}, 计数归零");
     }
 }
 
@@ -73,22 +89,45 @@ public class IfManager : MonoBehaviour
     // 遇到if符号时调用
     public void OnEncounterIfSymbol(NoteData ifNote)
     {
+        Debug.Log($"=== 遇到IF符号开始处理 ===");
+        Debug.Log($"IF符号数据: 行{ifNote.rowId}, 缩进{ifNote.indentLevel}, 条件码[{string.Join(",", ifNote.ifConditionCodes)}]");
+
         var existingIf = activeIfs.Find(i =>
             i.startRowId == ifNote.rowId && i.indentLevel == ifNote.indentLevel);
 
         if (existingIf != null)
         {
-            existingIf.UpdateAndGetCondition();
+            Debug.Log($"找到现有IF状态: 行{existingIf.startRowId}, 当前计数{existingIf.currentReadCount}");
+
+            // *** 步骤1：使用当前读取次数获取条件结果 ***
+            bool conditionResult = existingIf.UpdateAndGetCondition();
+            Debug.Log($"IF条件最终结果: {conditionResult}");
+
+            // *** 步骤2：增加读取次数，为下一次循环做准备 ***
+            existingIf.currentReadCount++;
+            Debug.Log($"IF符号读取次数增加: {existingIf.currentReadCount - 1} -> {existingIf.currentReadCount}");
         }
         else
         {
+            Debug.Log($"创建新的IF状态");
             var newIf = new IfState(ifNote.rowId, ifNote.indentLevel, ifNote.ifConditionCodes);
-            CalculateIfRange(newIf); // 确保调用
-            newIf.UpdateAndGetCondition();
+            CalculateIfRange(newIf);
+
+            // *** 步骤1：使用当前读取次数（0）获取条件结果 ***
+            bool conditionResult = newIf.UpdateAndGetCondition();
+            Debug.Log($"IF条件最终结果: {conditionResult}");
+
+            // *** 步骤2：增加读取次数，为下一次循环做准备 ***
+            newIf.currentReadCount++;
+            Debug.Log($"IF符号读取次数增加: {newIf.currentReadCount - 1} -> {newIf.currentReadCount}");
+
             activeIfs.Add(newIf);
 
-            Debug.Log($"新if状态创建完成: isRangeCalculated={newIf.isRangeCalculated}");
+            Debug.Log($"新IF状态创建完成: 条件结果{conditionResult}, 范围{newIf.ifBodyStartRow}->{newIf.endRowId}");
         }
+
+        DebugIfStates();
+        Debug.Log($"=== 遇到IF符号处理结束 ===\n");
     }
 
     public int GetReadCount(NoteData note)
@@ -97,7 +136,6 @@ public class IfManager : MonoBehaviour
             i.startRowId == note.rowId && i.indentLevel == note.indentLevel);
         return ifState?.currentReadCount ?? 0;
     }
-
 
     // 计算判断体范围
     private void CalculateIfRange(IfState ifState)
@@ -134,19 +172,18 @@ public class IfManager : MonoBehaviour
             }
         }
 
-        ifState.isRangeCalculated = true; // 必须设置这个！
+        ifState.isRangeCalculated = true;
         Debug.Log($"判断体范围计算完成: {ifState.ifBodyStartRow}->{ifState.endRowId}, isRangeCalculated={ifState.isRangeCalculated}");
     }
-
 
     // 检查行是否应该跳过
     public bool ShouldSkipRow(int rowId)
     {
-        Debug.Log($"ShouldSkipRow: 检查行{rowId}，活跃if数量: {activeIfs.Count}");
+        Debug.Log($"=== 检查是否跳过行{rowId} ===");
 
         foreach (var ifState in activeIfs)
         {
-            Debug.Log($"检查if状态: 行{ifState.startRowId}, 范围{ifState.ifBodyStartRow}->{ifState.endRowId}, 进入{ifState.shouldEnterBody}");
+            Debug.Log($"检查IF状态: 行{ifState.startRowId}, 范围{ifState.ifBodyStartRow}->{ifState.endRowId}, 进入{ifState.shouldEnterBody}");
 
             bool inBody = IsRowInIfBody(rowId, ifState);
             Debug.Log($"行{rowId}在判断体{ifState.startRowId}内: {inBody}");
@@ -198,8 +235,8 @@ public class IfManager : MonoBehaviour
         }
         var sortedRowIds = parser.GetSortedRowIds();
         int rowIndex = sortedRowIds.IndexOf(rowId);
-        int startIndex = sortedRowIds.IndexOf(ifState.ifBodyStartRow);  // 应该是-2
-        int endIndex = sortedRowIds.IndexOf(ifState.endRowId);          // 应该是-2
+        int startIndex = sortedRowIds.IndexOf(ifState.ifBodyStartRow);
+        int endIndex = sortedRowIds.IndexOf(ifState.endRowId);
 
         Debug.Log($"IsRowInIfBody: 行{rowId}在[{ifState.ifBodyStartRow}->{ifState.endRowId}]范围内? rowIndex={rowIndex}, startIndex={startIndex}, endIndex={endIndex}");
 
@@ -244,7 +281,7 @@ public class IfManager : MonoBehaviour
             if (ifState.indentLevel > outerLoopIndent)
             {
                 ifState.ResetForNewLoop();
-                Debug.Log($"内层判断{ifState.startRowId}重置: 新的判断码{ifState.conditionCodes[0]}");
+                Debug.Log($"内层判断{ifState.startRowId}重置: 新的计数{ifState.currentReadCount}, 条件码{ifState.conditionCodes[0]}");
             }
         }
     }

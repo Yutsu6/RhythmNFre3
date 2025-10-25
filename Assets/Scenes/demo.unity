@@ -219,38 +219,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!1 &272153492
-GameObject:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  serializedVersion: 6
-  m_Component:
-  - component: {fileID: 272153493}
-  m_Layer: 0
-  m_Name: GameObject
-  m_TagString: Untagged
-  m_Icon: {fileID: 0}
-  m_NavMeshLayer: 0
-  m_StaticEditorFlags: 0
-  m_IsActive: 1
---- !u!4 &272153493
-Transform:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 272153492}
-  serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 0, z: -2.174373}
-  m_LocalScale: {x: 1, y: 1, z: 1}
-  m_ConstrainProportionsScale: 0
-  m_Children:
-  - {fileID: 1079934569}
-  m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &381529062
 GameObject:
   m_ObjectHideFlags: 0
@@ -537,7 +505,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &559626993
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -545,7 +513,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 559626992}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 45491ff3f16918e4986dda5088f9f110, type: 3}
   m_Name: 
@@ -611,8 +579,8 @@ MonoBehaviour:
   loopManager: {fileID: 381529063}
   ifManager: {fileID: 1189889676}
   commandManager: {fileID: 215618761}
-  chartWindow: {fileID: 0}
-  musicPlayer: {fileID: 0}
+  chartWindow: {fileID: 1079934568}
+  musicPlayer: {fileID: 100915860}
   cursorTime: 0
   isActive: 0
 --- !u!4 &620592678
@@ -808,11 +776,11 @@ Transform:
   m_GameObject: {fileID: 1079934568}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: -1.56, y: 10.49, z: 12.3743725}
+  m_LocalPosition: {x: -1.573, y: 10.477, z: 0}
   m_LocalScale: {x: 19, y: 11.5, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
-  m_Father: {fileID: 272153493}
+  m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!212 &1079934570
 SpriteRenderer:
@@ -856,7 +824,7 @@ SpriteRenderer:
   m_SortingLayer: 0
   m_SortingOrder: 19
   m_Sprite: {fileID: 7482667652216324306, guid: 311925a002f4447b3a28927169b83ea6, type: 3}
-  m_Color: {r: 1, g: 0.26100624, b: 0.26100624, a: 0.69411767}
+  m_Color: {r: 1, g: 0.26100624, b: 0.26100624, a: 0}
   m_FlipX: 0
   m_FlipY: 0
   m_DrawMode: 0
@@ -1477,7 +1445,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8653719598885068355, guid: 2d92bc198c9673a4eae1934d92c73e4c, type: 3}
       propertyPath: m_IsActive
-      value: 1
+      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: -7552582706839291426, guid: 2d92bc198c9673a4eae1934d92c73e4c, type: 3}
       propertyPath: m_LocalScale.x
@@ -1771,4 +1739,4 @@ SceneRoots:
   - {fileID: 1672127643}
   - {fileID: 100915861}
   - {fileID: 1891870109}
-  - {fileID: 272153493}
+  - {fileID: 1079934569}
