@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Linq;
 using UnityEngine;
 
 public class CursorController : MonoBehaviour
@@ -13,6 +14,7 @@ public class CursorController : MonoBehaviour
     public IfManager ifManager;
     public CommandManager commandManager;
     public ChartWindow chartWindow;
+    public MusicPlayer musicPlayer;
 
     [Header("光标状态")]
     private float currentGridX = 0f;
@@ -49,11 +51,9 @@ public class CursorController : MonoBehaviour
 
     void InitializeCursor()
     {
-        // 获取BPM并计算光标速度
         float bpm = parser.GetBPM();
         float offset = parser.GetOffset();
 
-        // 设置 z 坐标
         Vector3 pos = transform.position;
         pos.z = -2f;
         transform.position = pos;
@@ -69,15 +69,18 @@ public class CursorController : MonoBehaviour
         currentGridX = 0f;
         cursorTime = offset;
 
-        // 初始化管理器
         loopManager.Initialize(parser);
         ifManager.Initialize(parser);
         parser.CalculateNoteTimestamps(speed);
 
-        // 初始化命令管理器
         if (commandManager == null)
             commandManager = FindObjectOfType<CommandManager>();
         commandManager?.ResetAllCommands();
+
+        if (musicPlayer != null)
+        {
+            musicPlayer.PlayMusic();
+        }
 
         UpdateWorldPosition();
         isActive = true;
@@ -91,7 +94,6 @@ public class CursorController : MonoBehaviour
 
         CheckSymbolsAndCommands();
 
-        // 横向移动
         if (isTimingActive)
         {
             currentGridX += speed * Time.deltaTime;
@@ -107,10 +109,9 @@ public class CursorController : MonoBehaviour
         }
     }
 
-    // 合并检查方法
     void CheckSymbolsAndCommands()
     {
-        if (currentGridX < 0.1f) // 行首检查
+        if (currentGridX < 0.1f)
         {
             CheckLoopSymbols();
             CheckIfSymbols();
@@ -148,13 +149,23 @@ public class CursorController : MonoBehaviour
 
     void CheckLoopBodyEntry()
     {
-        var loopForCurrentRow = loopManager.FindLoopForRow(currentRowId);
+        var loopForCurrentRow = loopManager.FindInnermostLoopForRow(currentRowId);
         if (loopForCurrentRow != null && loopForCurrentRow.loopBodyStartRow == currentRowId)
         {
-            if (!loopForCurrentRow.hasEnteredThisTime && loopForCurrentRow.remainingLoops > 0)
+            // 关键：只在循环活跃且未减少过次数时减少
+            if (loopForCurrentRow.isActive && !loopForCurrentRow.hasReducedThisCycle && loopForCurrentRow.remainingLoops > 0)
             {
                 loopForCurrentRow.remainingLoops--;
-                loopForCurrentRow.hasEnteredThisTime = true;
+                loopForCurrentRow.hasReducedThisCycle = true;
+
+                Debug.Log($"进入循环体: 行{currentRowId}, 减少次数, 剩余{loopForCurrentRow.remainingLoops}次");
+
+                // 如果减少后剩余次数为0，立即标记为不活跃
+                if (loopForCurrentRow.remainingLoops == 0)
+                {
+                    loopForCurrentRow.isActive = false;
+                    Debug.Log($"循环结束: 行{loopForCurrentRow.startRowId}, 剩余次数为0");
+                }
             }
         }
     }
@@ -174,7 +185,7 @@ public class CursorController : MonoBehaviour
     void UpdateWorldPosition()
     {
         Vector2 baseWorldPos = parser.GridWorld(currentRowId, currentGridX);
-        float indentOffset = GetCurrentRowIndentOffset() * parser.visualScale; // 缩进偏移缩放
+        float indentOffset = GetCurrentRowIndentOffset() * parser.visualScale;
 
         Vector3 finalPos = new Vector3(
             baseWorldPos.x + indentOffset,
@@ -229,7 +240,6 @@ public class CursorController : MonoBehaviour
         else
         {
             multiNote.isJudged = true;
-            // 隐藏Multi音符
             if (multiNote.noteObject != null)
                 multiNote.noteObject.SetActive(false);
         }
@@ -242,14 +252,13 @@ public class CursorController : MonoBehaviour
         var currentLayer = multiNote.GetCurrentLayer();
         if (currentLayer == null) return;
 
-        // 重新生成Multi音符（使用新的分段架构）
         Vector3 currentPosition = multiNote.noteObject.transform.position;
         Destroy(multiNote.noteObject);
 
-        // 使用spawner重新生成Multi音符
         if (spawner != null)
         {
             spawner.SpawnMultiNote(multiNote);
+            multiNote.noteObject.transform.position = currentPosition;
         }
         else
         {
@@ -261,56 +270,46 @@ public class CursorController : MonoBehaviour
     {
         int nextRow = currentRowId - 1;
 
+        Debug.Log($"行结束处理: 当前行{currentRowId}, 下一行{nextRow}");
+
         commandManager?.OnLeaveRow(currentRowId);
-        loopManager.CleanupCompletedLoops();
+        loopManager.DebugLoopStates();
 
-        // 检查各种跳转条件
-        if (TryIfSkip(nextRow)) return;
-        if (TryLoopSkip(nextRow)) return;
-        if (TryLoopBack()) return;
-
-        JumpToNextRow();
-    }
-
-    bool TryIfSkip(int nextRow)
-    {
-        if (ifManager.ShouldSkipRow(nextRow))
-        {
-            int ifSkipTarget = ifManager.GetSkipTargetRow(nextRow);
-            if (ifSkipTarget != currentRowId)
-            {
-                JumpToRow(ifSkipTarget);
-                return true;
-            }
-        }
-        return false;
-    }
-
-    bool TryLoopSkip(int nextRow)
-    {
-        if (loopManager.ShouldSkipRow(currentRowId, nextRow))
-        {
-            int loopSkipTarget = loopManager.GetSkipTargetRow(currentRowId);
-            if (loopSkipTarget != currentRowId)
-            {
-                JumpToRow(loopSkipTarget);
-                return true;
-            }
-        }
-        return false;
-    }
-
-    bool TryLoopBack()
-    {
+        // 优先级1: 循环跳转
         if (loopManager.ShouldLoopBack(currentRowId))
         {
             int loopBackRow = loopManager.GetLoopBackRow(currentRowId);
             currentRowId = loopBackRow;
             currentGridX = 0f;
             UpdateWorldPosition();
-            return true;
+            Debug.Log($"执行循环回跳: -> 行{currentRowId}");
+            return;
         }
-        return false;
+
+        // 优先级2: 循环跳过
+        if (loopManager.ShouldSkipRow(currentRowId, nextRow))
+        {
+            int skipTarget = loopManager.GetSkipTargetRow(currentRowId);
+            JumpToRow(skipTarget);
+            Debug.Log($"执行循环跳过: {currentRowId} -> 行{skipTarget}");
+            return;
+        }
+
+        // 优先级3: IF跳过
+        if (ifManager.ShouldSkipRow(nextRow))
+        {
+            int ifSkipTarget = ifManager.GetSkipTargetRow(nextRow);
+            if (ifSkipTarget != currentRowId)
+            {
+                JumpToRow(ifSkipTarget);
+                Debug.Log($"执行IF跳过: {currentRowId} -> 行{ifSkipTarget}");
+                return;
+            }
+        }
+
+        // 正常跳转
+        Debug.Log($"正常跳转到下一行: {currentRowId} -> {nextRow}");
+        JumpToNextRow();
     }
 
     void JumpToNextRow()
@@ -323,9 +322,7 @@ public class CursorController : MonoBehaviour
             return;
         }
 
-        // 通知 ChartWindow 跳转
         chartWindow?.OnCursorJumpToNextRow(currentRowId, nextRowId);
-
         currentRowId = nextRowId;
         currentGridX = 0f;
         UpdateWorldPosition();
@@ -351,16 +348,19 @@ public class CursorController : MonoBehaviour
 
     float GetCurrentRowLength()
     {
-        float maxPosition = 0f;
-        foreach (var note in parser.notes)
-        {
-            if (note.rowId == currentRowId)
-            {
-                float noteEnd = note.position + note.length;
-                if (noteEnd > maxPosition) maxPosition = noteEnd;
-            }
-        }
-        return maxPosition;
+        var rowNotes = parser.notes
+            .Where(n => n.rowId == currentRowId)
+            .OrderBy(n => n.position)
+            .ToList();
+
+        if (rowNotes.Count == 0) return 0f;
+
+        var lastNote = rowNotes.Last();
+        int lastNoteIndex = rowNotes.Count - 1;
+        float gapOffset = lastNoteIndex * parser.noteGap;
+        float rowLength = lastNote.position + lastNote.length + gapOffset;
+
+        return rowLength;
     }
 
     bool RowExists(int rowId)
@@ -378,7 +378,7 @@ public class CursorController : MonoBehaviour
         foreach (var note in parser.notes)
         {
             if (note.rowId == currentRowId)
-                return note.indentLevel * parser.cellSize; // 这里返回逻辑值，在UpdateWorldPosition中缩放
+                return note.indentLevel * parser.cellSize;
         }
         return 0f;
     }

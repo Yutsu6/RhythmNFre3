@@ -186,7 +186,7 @@ public class ChartSpawner : MonoBehaviour
         GameObject part = Instantiate(prefab, container.transform);
         part.name = partName;
 
-        // 修改这里：应用视觉缩放
+        // 音符内部部件保持原长度（不减去间隙）
         Vector3 originalScale = part.transform.localScale;
         part.transform.localScale = new Vector3(
             length * parser.cellSize * parser.visualScale,
@@ -194,7 +194,7 @@ public class ChartSpawner : MonoBehaviour
             originalScale.z
         );
 
-        // 修改这里：偏移位置也要缩放
+        // 音符内部部件位置保持连续
         part.transform.localPosition = new Vector3(
             offsetX * parser.cellSize * parser.visualScale,
             0f,
@@ -240,7 +240,7 @@ public class ChartSpawner : MonoBehaviour
 
     void SpawnHoldLines(GameObject bodyPart, float bodyLength)
     {
-        // 计算整个hold音符的总长度
+        // 使用原始长度（不减去间隙）
         float totalHoldLength = bodyLength + HEAD_LENGTH + TAIL_LENGTH;
 
         HoldLineData lineData = CalculateHoldLinePositions(totalHoldLength);
@@ -249,8 +249,7 @@ public class ChartSpawner : MonoBehaviour
 
         for (int i = 0; i < lineData.positions.Length; i++)
         {
-            // 世界坐标位置转换为body局部坐标
-            // body的局部坐标系中，0对应世界坐标的HEAD_LENGTH，1对应世界坐标的HEAD_LENGTH + bodyLength
+            // 使用原始坐标计算（音符内部连续）
             float worldPos = lineData.positions[i];
             float localPosInBody = (worldPos - HEAD_LENGTH) / bodyLength;
 
@@ -258,51 +257,11 @@ public class ChartSpawner : MonoBehaviour
         }
     }
 
-
-    GameObject CreateHoldLine(GameObject bodyPart, float localPosition, int index, float bodyLength)
-    {
-        GameObject line;
-
-        if (holdLinePrefab != null)
-        {
-            line = Instantiate(holdLinePrefab, bodyPart.transform);
-        }
-        else
-        {
-            line = new GameObject($"HoldLine_{index}");
-            line.transform.SetParent(bodyPart.transform);
-            SpriteRenderer renderer = line.AddComponent<SpriteRenderer>();
-            renderer.color = new Color(1f, 1f, 1f, 0.7f);
-        }
-
-        // 设置局部位置（body的局部坐标系是0~1）
-        line.transform.localPosition = new Vector3(
-            localPosition,
-            0.5f * parser.visualScale,  // Y位置也要缩放
-            -0.1f
-        );
-
-        // 设置缩放：标准宽度1/6，需要抵消body的缩放
-        float standardLineWidth = 1f / 6f;
-        float localScaleX = standardLineWidth / bodyLength;
-
-        // 修正：Y缩放设置为0.68
-        line.transform.localScale = new Vector3(
-           localScaleX * parser.visualScale,
-           0.68f * parser.visualScale,
-           1f
-       );
-
-
-        allSpawnedObjects.Add(line);
-        return line;
-    }
-
     HoldLineData CalculateHoldLinePositions(float totalHoldLength)
     {
         List<float> positions = new List<float>();
 
-        // 特殊情况：长度为1时的固定方案
+        // 特殊情况：长度为1时的固定方案（原始逻辑）
         if (Mathf.Abs(totalHoldLength - 1.0f) < 0.01f)
         {
             return new HoldLineData
@@ -313,7 +272,7 @@ public class ChartSpawner : MonoBehaviour
             };
         }
 
-        // 计算可用空间：从0.3到totalHoldLength-0.3
+        // 计算可用空间：从0.3到totalHoldLength-0.3（原始逻辑）
         float startPos = 0.3f;
         float endPos = totalHoldLength - 0.3f;
         float availableSpace = endPos - startPos;
@@ -406,6 +365,36 @@ public class ChartSpawner : MonoBehaviour
         };
     }
 
+    GameObject CreateHoldLine(GameObject bodyPart, float localPosition, int index, float bodyLength)
+    {
+        GameObject line;
+
+        if (holdLinePrefab != null)
+        {
+            line = Instantiate(holdLinePrefab, bodyPart.transform);
+        }
+        else
+        {
+            line = new GameObject($"HoldLine_{index}");
+            line.transform.SetParent(bodyPart.transform);
+            SpriteRenderer renderer = line.AddComponent<SpriteRenderer>();
+            renderer.color = new Color(1f, 1f, 1f, 0.7f);
+        }
+
+        // 设置局部位置（body的局部坐标系是0~1）
+        line.transform.localPosition = new Vector3(localPosition, 0.5f * parser.visualScale, -0.1f);
+
+        // 设置缩放：标准宽度1/6，需要抵消body的缩放
+        float standardLineWidth = 1f / 6f;
+        float localScaleX = standardLineWidth / bodyLength;
+
+        // 修正：Y缩放设置为0.68，并应用视觉缩放
+        line.transform.localScale = new Vector3(localScaleX * parser.visualScale, 0.68f * parser.visualScale, 1f);
+
+        allSpawnedObjects.Add(line);
+        return line;
+    }
+
     public void SpawnMultiNote(MultiNoteData multiNoteData)
     {
         Debug.Log($"生成Multi音符: 行{multiNoteData.rowId} 位置{multiNoteData.position} 总长{multiNoteData.length}");
@@ -431,16 +420,69 @@ public class ChartSpawner : MonoBehaviour
         multiContainer.transform.SetParent(this.transform);
         allSpawnedObjects.Add(multiContainer);
 
+        // 修改这里：创建一个临时的NoteData来生成当前层的音符部件
+        NoteData tempNoteData = new NoteData
+        {
+            rowId = multiNoteData.rowId,
+            position = multiNoteData.position,
+            length = currentLayer.length, // 使用当前层的长度
+            type = currentLayer.type,     // 使用当前层的类型
+            indentLevel = multiNoteData.indentLevel
+        };
+
         // 使用当前层的类型生成头身尾
-        SpawnNoteParts(multiContainer, multiNoteData);
+        SpawnNoteParts(multiContainer, tempNoteData);
 
         multiNoteData.noteObject = multiContainer;
 
         // 添加Multi指示器
         SpawnMultiIndicator(multiContainer, multiNoteData);
-        SpawnStructureSymbols(multiNoteData, multiContainer);
+
+        // 生成当前层的结构符号
+        SpawnMultiLayerStructureSymbols(multiNoteData, multiContainer, currentLayer);
 
         Debug.Log($"Multi音符生成完成: 当前层={currentLayer.type}({multiNoteData.currentLayerIndex + 1}/{multiNoteData.layers.Count})");
+    }
+
+    // 新增：生成Multi音符当前层的结构符号
+    void SpawnMultiLayerStructureSymbols(MultiNoteData multiNoteData, GameObject parentNote, MultiNoteLayer currentLayer)
+    {
+        if (currentLayer.structureSymbols.Count == 0) return;
+
+        Debug.Log($"生成Multi层结构符号: {currentLayer.structureSymbols.Count}个");
+
+        foreach (var symbol in currentLayer.structureSymbols)
+        {
+            Vector2 symbolPosition = CalculateSymbolPosition(multiNoteData);
+
+            switch (symbol.symbolType)
+            {
+                case "loop":
+                    SpawnSymbol(loopSymbolPrefab, parentNote, symbolPosition, $"LoopSymbol_row{multiNoteData.rowId}");
+                    break;
+                case "if":
+                    SpawnSymbol(ifSymbolPrefab, parentNote, symbolPosition, $"IfSymbol_row{multiNoteData.rowId}");
+                    break;
+                case "break":
+                    SpawnSymbol(breakSymbolPrefab, parentNote, symbolPosition, $"BreakSymbol_row{multiNoteData.rowId}");
+                    break;
+                case "continue":
+                    SpawnSymbol(continueSymbolPrefab, parentNote, symbolPosition, $"ContinueSymbol_row{multiNoteData.rowId}");
+                    break;
+                case "return":
+                    SpawnSymbol(returnSymbolPrefab, parentNote, symbolPosition, $"ReturnSymbol_row{multiNoteData.rowId}");
+                    break;
+                case "comment":
+                    SpawnSymbol(commentSymbolPrefab, parentNote, symbolPosition, $"CommentSymbol_row{multiNoteData.rowId}");
+                    break;
+                case "speed":
+                    SpawnSpeedSymbol(multiNoteData, parentNote, symbol as SpeedSymbol);
+                    break;
+                default:
+                    Debug.LogWarning($"未知的结构符号类型: {symbol.symbolType}");
+                    break;
+            }
+        }
     }
 
     void SpawnMultiIndicator(GameObject multiObject, MultiNoteData multiNoteData)
@@ -453,10 +495,11 @@ public class ChartSpawner : MonoBehaviour
 
         GameObject indicator = Instantiate(multiIndicatorPrefab, multiObject.transform);
 
-        // 设置位置：音符右侧
-        float noteWidth = multiNoteData.length * parser.cellSize;
+        // 设置位置：音符右侧（不考虑间隙，因为音符内部连续）
+        float noteWidth = multiNoteData.length * parser.cellSize * parser.visualScale;
+
         indicator.transform.localPosition = new Vector3(
-            noteWidth * 0.5f + 0.2f, // 右侧偏移
+            noteWidth * 0.5f + 0.2f * parser.visualScale, // 右侧偏移
             0f,
             -0.2f
         );
@@ -474,6 +517,9 @@ public class ChartSpawner : MonoBehaviour
             textMesh.text = multiNoteData.GetRemainingLayers().ToString();
             var updater = indicator.AddComponent<MultiIndicatorUpdater>();
             updater.multiNoteData = multiNoteData;
+
+            // 应用视觉缩放到指示器
+            ApplyVisualScaleToSymbol(indicator);
         }
         else
         {
@@ -530,29 +576,58 @@ public class ChartSpawner : MonoBehaviour
         }
 
         GameObject symbol = Instantiate(symbolPrefab, parent.transform);
-        symbol.transform.position = new Vector3(position.x, position.y, -0.1f);
+        symbol.transform.localPosition = new Vector3(0f, 0f, -0.1f); // 修改为局部坐标 (0,0)
         symbol.name = name;
+
+        // 应用视觉缩放到符号
+        ApplyVisualScaleToSymbol(symbol);
+
         allSpawnedObjects.Add(symbol);
 
         Debug.Log($"生成符号: {name}");
     }
 
+
+    void ApplyVisualScaleToSymbol(GameObject symbol)
+    {
+        if (symbol == null || parser == null) return;
+
+        // 获取符号的原始缩放
+        Vector3 originalScale = symbol.transform.localScale;
+
+        // 应用视觉缩放
+        symbol.transform.localScale = new Vector3(
+            originalScale.x * parser.visualScale,
+            originalScale.y * parser.visualScale,
+            originalScale.z
+        );
+    }
+
     void SpawnSpeedSymbol(NoteData noteData, GameObject parentNote, SpeedSymbol speedSymbol)
     {
+        Debug.Log($"开始生成变速符号: 类型={speedSymbol.speedType}, 行{noteData.rowId}, 位置{noteData.position}");
+
         GameObject prefabToUse = speedSymbol.speedType == "F" ? speedSymbolF : speedSymbolL;
+
+        Debug.Log($"选择的预制体: {prefabToUse?.name ?? "NULL"}");
+        Debug.Log($"F预制体状态: {speedSymbolF != null}, L预制体状态: {speedSymbolL != null}");
+
         if (prefabToUse == null)
         {
-            Debug.LogWarning($"变速符号预制体未设置: {speedSymbol.speedType}");
+            Debug.LogError($"变速符号预制体未设置: {speedSymbol.speedType}");
             return;
         }
 
-        Vector2 symbolPosition = CalculateSymbolPosition(noteData);
         GameObject symbolObj = Instantiate(prefabToUse, parentNote.transform);
-        symbolObj.transform.position = new Vector3(symbolPosition.x, symbolPosition.y, -0.1f);
+        symbolObj.transform.localPosition = new Vector3(0f, 0f, -0.1f);
         symbolObj.name = $"SpeedSymbol_{speedSymbol.speedType}";
+
+        // 应用视觉缩放
+        ApplyVisualScaleToSymbol(symbolObj);
+
         allSpawnedObjects.Add(symbolObj);
 
-        Debug.Log($"生成变速符号: {speedSymbol.speedType}");
+        Debug.Log($"成功生成变速符号: {speedSymbol.speedType}, 父对象: {parentNote.name}");
     }
 
     // 辅助方法
@@ -569,15 +644,39 @@ public class ChartSpawner : MonoBehaviour
     Vector2 CalculateWorldPosition(NoteData noteData)
     {
         Vector2 basePos = parser.GridWorld(noteData.rowId, noteData.position);
-        float indentOffset = noteData.indentLevel * parser.cellSize * parser.visualScale; // 缩进也要缩放
-        return new Vector2(basePos.x + indentOffset, basePos.y);
+        float indentOffset = noteData.indentLevel * parser.cellSize * parser.visualScale;
+
+        // 音符之间间隙：每个音符向右偏移 (音符索引 × 间隙)
+        float gapOffset = CalculateNoteGapOffset(noteData);
+
+        return new Vector2(basePos.x + indentOffset + gapOffset, basePos.y);
+    }
+
+    // 新增：计算音符间隙偏移
+    float CalculateNoteGapOffset(NoteData currentNote)
+    {
+        // 获取同一行的所有音符并按位置排序
+        var rowNotes = parser.notes
+            .Where(n => n.rowId == currentNote.rowId)
+            .OrderBy(n => n.position)
+            .ToList();
+
+        // 找到当前音符在行中的索引
+        int noteIndex = rowNotes.FindIndex(n => n == currentNote);
+
+        if (noteIndex < 0) return 0f;
+
+        // 每个音符向右偏移 (索引 × 间隙)
+        return noteIndex * parser.noteGap * parser.cellSize * parser.visualScale;
     }
 
     Vector2 CalculateSymbolPosition(NoteData noteData)
     {
         Vector2 basePos = CalculateWorldPosition(noteData);
-        // 符号位置也要缩放
+
+        // 符号放在音符中间位置（不考虑间隙，因为音符内部是连续的）
         float symbolOffset = Mathf.Min(0.5f, noteData.length * 0.5f) * parser.cellSize * parser.visualScale;
+
         return new Vector2(basePos.x + symbolOffset, basePos.y);
     }
 
@@ -641,10 +740,10 @@ public class ChartSpawner : MonoBehaviour
     {
         public float[] positions;
         public float spacing;
-        public int lineCount; // 添加这行
+        public int lineCount;
     }
 
-    // Multi指示器更新器（保持不变）
+    // Multi指示器更新器
     public class MultiIndicatorUpdater : MonoBehaviour
     {
         public MultiNoteData multiNoteData;

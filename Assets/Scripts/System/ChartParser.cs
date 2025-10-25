@@ -22,6 +22,7 @@ public class ChartParser : MonoBehaviour
     public float rowHeight = 1.5f;          //垂直间距
 
     public float visualScale = 0.8f;        // 新增：视觉缩放系数
+    public float noteGap = 0.1f;            // 音符间隙
 
 
     // 新增：Meta数据
